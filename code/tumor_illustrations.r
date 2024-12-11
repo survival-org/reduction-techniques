@@ -113,4 +113,31 @@ gg_baseline <- ggplot(pred_long, aes(x = tend, y = prob, color = interaction(com
 
 
 # RMST
+# PEM / PAM
+  
+  # calculate rmst
+  rmst_df <- pred_pam %>%
+    group_by(complications) %>%
+    summarise(rmst = sum(prob_pam * diff(c(0, tend))))
+  
+  rmst_df
+  
+  pred_pam_wide <- pred_pam |> select(tend
+                                  , complications
+                                  , prob_pam) |> 
+    pivot_wider(names_from = complications
+                , values_from = prob_pam) |>
+    mutate(diff = abs(yes - no))
+  
+  ggplot(pred_pam_wide, aes(x = tend)) +
+    geom_line(aes(y = yes), col="firebrick2") +
+    geom_line(aes(y = no), col="steelblue") +
+    # Ribbon for the shaded area
+    geom_ribbon(aes(ymin = yes, ymax = no), fill = "grey", alpha = 0.2) +
+    labs(y = "Survival Probability", x = "Time",
+         title = "RMST complications 'yes' and 'no'",
+         subtitle = "Grey area represents RMST difference") +
+    theme_minimal() +
+    theme(legend.position = "none")
+  
 TBD
