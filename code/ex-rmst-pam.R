@@ -2,6 +2,7 @@
 
 # load libraries
 library(dplyr)
+library(tidyr)
 library(mgcv)
 library(pammtools)
 library(ggplot2)
@@ -15,7 +16,7 @@ pam <- gam(ped_status ~ s(tend, by = complications) + complications, data = ped,
            family = poisson(), offset = offset)
 
 # build new data frame
-ped_df <- ped %>% 
+ped_df <- ped %>%
   make_newdata(tend = unique(tend)
                , complications = unique(complications)) |>
   group_by(complications) |>
@@ -40,7 +41,7 @@ ped_df_wide <- ped_df |> select(tstart
                                 , interval
                                 , offset
                                 , complications
-                                , surv_prob) |> 
+                                , surv_prob) |>
   pivot_wider(names_from = complications
               , values_from = surv_prob) |>
   mutate(diff = abs(yes - no))

@@ -19,14 +19,23 @@ cutpoints <- seq(0, 3800, by=100)
 tumor_partitioned <- tumor %>% as_ped(Surv(days, status) ~ ., cut = cutpoints)
 
 # modeling
+
+## KM
+km <- survfit(Surv(days, status) ~ complications, data = tumor, se.fit = TRUE)
+
 ## Cox
 cox <- coxph(
     formula = Surv(days, status) ~ strata(complications),
     data = tumor)
 
-base_df <- basehaz(cox) %>% rename(nelson_aalen = hazard)
-ggplot(base_df, aes(x = time, y = nelson_aalen)) +
-  geom_stephazard() +
+cox_df <- basehaz(cox) %>%
+  group_by(strata) %>%
+  mutate(prob_km = exp(-hazard)) %>%
+  ungroup() %>%
+  rename(complications = strata)
+
+ggplot(base_df, aes(x = time, y = nelson_aalen, group = strata)) +
+  geom_stephazard(data=cox_df, aes(x=time, y=prob_km)) +
   ylab(expression(hat(Lambda)(t))) + xlab("t") +
   ggtitle("Nelson-Aalen estimate of the cumulative hazard")
 
@@ -65,19 +74,15 @@ pv <- geese(
     family = gaussian(link = "identity"))
 
 # survival curves
-cox_df <- broom::tidy(survfit(cox))
-ggplot(cox_df, aes(x=time,y=estimate,col=strata)) + geom_step()
-
-
-new_data <- expand.grid(tend = cutpoints[-1], complications = unique(tumor$complications)) %>%
-    mutate(intlen = 100) # hard coded!!!
+new_data <- tumor_partitioned %>%
+  make_newdata(tend = unique(tend), complications = unique(complications))
 
 pred_pam <- new_data %>%
     group_by(complications) %>%
     add_surv_prob(pam) %>%
     ungroup() %>%
-    rename(prob_pam = surv_prob, lower_pam = surv_lower, upper_pam = surv_upper) %>%
-    select(-c(intlen, lower_pam, upper_pam))
+    rename(prob_pam = surv_prob) %>%
+    select(tend, complications, prob_pam)
 
 pred_dt <- new_data %>%
     mutate(
@@ -87,10 +92,10 @@ pred_dt <- new_data %>%
     group_by(complications) %>%
     mutate(prob_dt = cumprod(1 - hazard_dt)) %>%
     ungroup() %>%
-    select(-c(intlen, eta_dt, hazard_dt))
+    select(tend, complications, prob_dt)
 
-pred <- pred_dt %>%
-    left_join(pred_pam, by = c("tend", "complications"))
+pred <- pred_pam %>%
+    left_join(pred_dt, by = c("tend", "complications"))
 
 pred_long <- pred %>%
   pivot_longer(
@@ -100,9 +105,20 @@ pred_long <- pred %>%
     names_pattern = "prob_(.*)"
   )
 
-gg_baseline <- ggplot(pred_long, aes(x = tend, y = prob, color = interaction(complications, model))) +
+km_df <- broom::tidy(km)
+km_long <- km_df %>%
+  rename(
+    tend = time,
+    prob = estimate,
+    complications = strata
+  ) %>%
+  mutate(
+    model = "km"
+  )
+
+gg_survCurves <- ggplot(pred_long, aes(x = tend, y = prob, color = interaction(complications, model))) +
   geom_line(linewidth = 1) +
-  geom_stephazard(data = base_df, aes(x=time, y = nelson_aalen, col = "Nelson-Aalen")) # tbd
+  geom_stephazard(data=cox_df, aes(x=time, y=prob_km)) +
   labs(
     title = "Survival Probabilities by Model and Complications",
     x = "Time (tend)",
@@ -111,26 +127,27 @@ gg_baseline <- ggplot(pred_long, aes(x = tend, y = prob, color = interaction(com
   ) +
   theme_minimal()
 
+gg_survCurves
 
 # RMST
 
   ## PEM / PAM
-  
+
   # calculate rmst (integrate step function)
   rmst_pam <- pred_pam %>%
     group_by(complications) %>%
     summarise(rmst = sum(prob_pam * diff(c(0, tend))))
-  
+
   rmst_pam
-  
+
   # transform into wide format for plotting area between survival curves
   pred_pam_wide <- pred_pam |> select(tend
                                   , complications
-                                  , prob_pam) |> 
+                                  , prob_pam) |>
     pivot_wider(names_from = complications
                 , values_from = prob_pam) |>
     mutate(diff = abs(yes - no))
-  
+
   # plot survival curves and area corresponding to rmst
   gg_rmst_pam <- ggplot(pred_pam_wide, aes(x = tend)) +
     geom_line(aes(y = yes), col="firebrick2") +
@@ -148,17 +165,17 @@ gg_baseline <- ggplot(pred_long, aes(x = tend, y = prob, color = interaction(com
   rmst_dt <- pred_dt %>%
     group_by(complications) %>%
     summarise(rmst = sum(prob_dt * diff(c(0, tend))))
-  
+
   rmst_dt
-  
+
   # transform into wide format for plotting area between survival curves
   pred_dt_wide <- pred_dt |> select(tend
                                       , complications
-                                      , prob_dt) |> 
+                                      , prob_dt) |>
     pivot_wider(names_from = complications
                 , values_from = prob_dt) |>
     mutate(diff = abs(yes - no))
-  
+
   # plot survival curves and area corresponding to rmst
   gg_rmst_dt <- ggplot(pred_dt_wide, aes(x = tend)) +
     geom_line(aes(y = yes), col="firebrick2") +
@@ -170,6 +187,6 @@ gg_baseline <- ggplot(pred_long, aes(x = tend, y = prob, color = interaction(com
          subtitle = "Grey area represents RMST difference") +
     theme_minimal() +
     theme(legend.position = "none")
-  
+
 ## merge results
 tbd
