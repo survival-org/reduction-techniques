@@ -99,7 +99,11 @@ ped_cr <- as_ped(sir.adm, Surv(time, status)~ ., combine = TRUE) |>
   mutate(cause = as.factor(cause), pneu = as.factor(pneu))
 
 # estimate pam
-pam <- pamm(ped_status ~ s(tend, by = interaction(cause, pneu)) + cause*pneu, data = ped_cr)
+pam <- pamm(ped_status ~ s(tend, by = interaction(cause, pneu), k = 20) + cause*pneu, data = ped_cr)
+
+gam <- gam(formula = ped_status ~ s(tend, by = interaction(cause, pneu)) + cause*pneu, data = ped_cr
+           , family=poisson(link="log")
+           , offset = offset)
 
 # build new data frame including cif for pam
 ndf_cr <- ped_cr |>
@@ -107,13 +111,15 @@ ndf_cr <- ped_cr |>
 
 ndf_cr_pam <- ndf_cr |>
   group_by(cause, pneu) |> # important!
-  add_cif(pam) |> ungroup() |>
-  select(tend, pneu, cause, cif, cif_lower, cif_upper) |>
+  add_cif(pam, ci=F) |> ungroup() |>
   mutate(
+    cif_lower = NA,
+    cif_upper = NA,
     cause = factor(cause, labels = c("Discharge", "Death")),
     pneu = factor(pneu, labels = c("No Pneumonia", "Pneumonia")),
     model = "pam"
-  )
+  ) |>
+  select(tend, pneu, cause, cif, cif_lower, cif_upper, model)
 
 ## -------------------------------------------------------------------------- ##
 ## Discrete Time
@@ -170,9 +176,30 @@ ggplot(ndf_cr_combined, aes(x = tend, y = cif, col = model)) + geom_line(aes(lin
   geom_ribbon(aes(ymin = cif_lower, ymax = cif_upper, linetype = pneu, fill = model), alpha = .3) +
   facet_wrap(~cause) +
   labs(y = "CIF", x = "time", color = "Model", fill = "Model") +
-  scale_color_manual(values = c("grey", "firebrick2", "steelblue", "tan4")) +
-  scale_fill_manual(values = c("grey", "firebrick2", "steelblue", "tan4")) +
-  xlim(c(0,100))
+  scale_color_manual(
+    name = "model",
+    values = c("pam" = "firebrick2", "dt" = "steelblue", "km" = "black"),
+    breaks = c("pam", "dt", "km"),
+    labels = c("PAM", "DT", "KM")
+  ) +
+  scale_fill_manual(
+    name = "model",
+    values = c("pam" = "firebrick2", "dt" = "steelblue", "km" = "black"),
+    breaks = c("pam", "dt", "km"),
+    labels = c("PAM", "DT", "KM")) +
+  labs(
+    x = "Time",
+    y = "Cumulative Incidence Function"
+  ) +
+  theme_minimal(base_size = label_size) +
+  theme(
+    axis.title = element_text(size = label_size),
+    axis.text = element_text(size = label_size),
+    legend.text = element_text(size = label_size),
+    legend.position = "right"
+  ) +
+  xlim(c(0,100)) + 
+  ylim(c(0,1))
 
 
 
