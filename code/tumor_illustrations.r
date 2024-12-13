@@ -177,12 +177,26 @@ rmst_dt_time <- pred_dt %>%
          , model = "dt") |>
   select(-prob_dt)
 
+## -------------------------------------------------------------------------- ##
+## PV
+## -------------------------------------------------------------------------- ##
+
+# TBD
+# table must contain
+# - time
+# - complications
+# - rmst
+# - model = "pv"
+
+
 ## merge results
 rmst_time <- rbind(rmst_km_time
                    , rmst_pam_time
                    , rmst_dt_time
+                   #, rmst_pv_time
                    )
 
+# plot rmst over time
 gg_rmst_time <- ggplot(rmst_time, aes(x = tend, y = rmst)) +
   geom_line(aes(color = model, linetype = complications), linewidth = linewidth) +
   scale_color_manual(
@@ -195,6 +209,8 @@ gg_rmst_time <- ggplot(rmst_time, aes(x = tend, y = rmst)) +
   theme(legend.position = "right")
 
 gg_rmst_time
+ggsave("figures/rmst_over_time.png", gg_rmst_time, width = 10, height = 6, dpi = 300)
+
 
 ## -------------------------------------------------------------------------- ##
 ## Backup: Further plots
