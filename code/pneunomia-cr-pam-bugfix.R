@@ -11,9 +11,8 @@ library(etm)               # aalen johansen estimator
 library(cmprsk)            # needed for competing risks in etm, cf. Beyersmann p. 79
 theme_set(theme_bw())
 
-#setwd("C:/Users/ra56yaf/Desktop/Projects/StaBLab/Survival Analysis/survival_reductionTechniques/reduction-techniques/code") # set wd here!!!
-setwd("C:/Users/ra63liw/Documents/98_git/reduction-techniques")
-source("code/functions/etm-ci-trafo.R")
+setwd("C:/Users/ra56yaf/Desktop/Projects/StaBLab/Survival Analysis/survival_reductionTechniques/reduction-techniques/code") # set wd here!!!
+source("functions/etm-ci-trafo.R")
 
 # load pneunomia data
 data(sir.adm, package = "mvna")
@@ -92,58 +91,31 @@ ndf_cr_aj <- rbind(
   )
 
 ## -------------------------------------------------------------------------- ##
-## PAM, ndf_cr can be used for DT as well
+## PAM via gam and predict w/o pammtools helper
 ## -------------------------------------------------------------------------- ##
-
-# create ped data set
-ped_cr <- as_ped(sir.adm, Surv(time, status)~ ., combine = TRUE) |>
-  mutate(cause = as.factor(cause), pneu = as.factor(pneu))
-
-# estimate pam
-pam <- pamm(ped_status ~ s(tend, by = interaction(cause, pneu)) + cause*pneu, data = ped_cr)
-
-# build new data frame including cif for pam
-ndf_cr <- ped_cr |>
-  make_newdata(tend = unique(tend), pneu = unique(pneu), cause = unique(cause))
-
-ndf_cr_pam <- ndf_cr |>
-  group_by(cause, pneu) |> # important!
-  add_cif(pam, ci=F, time_var = "tend") |> ungroup() |>
-  mutate(
-    cif_lower = NA,
-    cif_upper = NA,
-    cause = factor(cause, labels = c("Discharge", "Death")),
-    pneu = factor(pneu, labels = c("No Pneumonia", "Pneumonia")),
-    model = "pam"
-  ) |>
-  select(tend, pneu, cause, cif, cif_lower, cif_upper, model)
-
-## -------------------------------------------------------------------------- ##
-## Discrete Time
-## -------------------------------------------------------------------------- ##
-
-dt <- gam(
+pam <- gam(
   formula = ped_status ~ s(tend, by = interaction(cause, pneu)) + cause*pneu,
   data = ped_cr,
-  family = binomial(link = "logit"))
+  family = poisson(link = "log"),
+  offset = offset)
 
-ndf_cr_dt_interim <- ndf_cr %>%
-    mutate(eta = predict(dt, newdata = ., type = "link"), hazard = exp(eta) / (1 + exp(eta))) # predict cause-specific hazards
+ndf_cr_pam_interim <- ndf_cr %>%
+  mutate(hazard = predict(pam, newdata = ., type = "response")) # predict cause-specific hazards
 
-ndf_cr_dt_wide <- ndf_cr_dt_interim %>%
+ndf_cr_pam_wide <- ndf_cr_pam_interim %>%
   pivot_wider(names_from = cause, values_from = hazard, names_prefix = "hazard_", values_fill = 0) %>% # so each row contains all cause-specific hazards
   mutate(hazard_allCause = rowSums(across(starts_with("hazard_")))) %>% # sum of all cause-specific hazards
   arrange(pneu, tend) %>%
   group_by(pneu) %>%
   mutate(
-    surv_allCause = cumprod(1 - hazard_allCause), # S_allCause(t) = product over u ≤ t of (1 - hazard_allCause(u))
+    surv_allCause = exp(- cumsum(hazard_allCause)), # S_allCause(t) = product over u ≤ t of (1 - hazard_allCause(u))
     surv_allCause_lag = lag(surv_allCause, default = 1),
     cif_1 = cumsum(surv_allCause_lag * hazard_1), # CIF_j(t) = sum over u ≤ t of [S_allCause(u^-)*hazard_j(u)]
     cif_2 = cumsum(surv_allCause_lag * hazard_2)
   ) %>%
   ungroup()
 
-ndf_cr_dt <- ndf_cr_dt_wide %>%
+ndf_cr_pam <- ndf_cr_pam_wide %>%
   select(tend, pneu, cif_1, cif_2) %>%
   pivot_longer(
     cols = starts_with("cif_"),
@@ -156,19 +128,15 @@ ndf_cr_dt <- ndf_cr_dt_wide %>%
     cif_upper = NA,
     cause = factor(cause, levels = c("1", "2"), labels = c("Discharge", "Death")),
     pneu = factor(pneu, labels = c("No Pneumonia", "Pneumonia")),
-    model = "dt"
+    model = "pam"
   )
-
-## -------------------------------------------------------------------------- ##
-## Pseudo Obs
-## -------------------------------------------------------------------------- ##
 
 # visualize effect
 
 # combine all data sets
-ndf_cr_combined <- rbind(ndf_cr_aj, ndf_cr_pam, ndf_cr_dt)
+ndf_cr_combined <- rbind(ndf_cr_aj, ndf_cr_pam)
 
-# tbd: include dt example with color "firebrick2" to be consistent
+# tbd: include pam example with color "firebrick2" to be consistent
 ggplot(ndf_cr_combined, aes(x = tend, y = cif, col = model)) + geom_line(aes(linetype = pneu, col = model)) +
   geom_ribbon(aes(ymin = cif_lower, ymax = cif_upper, linetype = pneu, fill = model), alpha = .3) +
   facet_wrap(~cause) +
@@ -197,6 +165,5 @@ ggplot(ndf_cr_combined, aes(x = tend, y = cif, col = model)) + geom_line(aes(lin
   ) +
   xlim(c(0,100)) + 
   ylim(c(0,1))
-
 
 
