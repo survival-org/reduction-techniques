@@ -8,6 +8,13 @@ library(pseudo)
 library(geepack)
 library(ggplot2)
 
+# initialize variables
+setwd("C:/Users/ra63liw/Documents/98_git/reduction-techniques")                                   # !! set wd individually !!
+linewidth = 1
+label_size = 24
+
+
+
 # load data
 data("tumor", package = "pammtools")
 
@@ -116,7 +123,7 @@ gg_survCurves <- ggplot(pred_long, aes(x = tend, y = prob)) +
   geom_ribbon(data = km_df, aes(ymin = km_low, ymax = km_high, fill = complications), alpha = .3, color = NA) +
   scale_color_manual(
     name = "model",
-    values = c("pam" = "blue", "dt" = "red", "km" = "black"),
+    values = c("pam" = "firebrick2", "dt" = "steelblue", "km" = "black"),
     breaks = c("pam", "dt", "km"),
     labels = c("PAM", "DT", "KM")
   ) +
@@ -136,21 +143,74 @@ gg_survCurves <- ggplot(pred_long, aes(x = tend, y = prob)) +
 gg_survCurves
 ggsave("figures/survival_curves.png", gg_survCurves, width = 10, height = 6, dpi = 300) # TBD: add PV (whole curves or only points?) as dark orange/brown
 
-# RMST ----
+## -------------------------------------------------------------------------- ##
+# RMST
+## -------------------------------------------------------------------------- ##
 
+## -------------------------------------------------------------------------- ##
+## KM
+## -------------------------------------------------------------------------- ##
+rmst_km_time <- km_df |>
+  group_by(complications) |>
+  mutate(rmst = cumsum(prob * diff(c(0, tend)))
+         , model = "km") |>
+  select(-c(prob, km_low, km_high))
+
+## -------------------------------------------------------------------------- ##
 ## PEM / PAM
+## -------------------------------------------------------------------------- ##
+# calculate rmst (integrate step function)
+rmst_pam_time <- pred_pam %>%
+  group_by(complications) %>%
+  mutate(rmst = cumsum(prob_pam * diff(c(0, tend)))
+         , model = "pam") |>
+  select(-prob_pam)
+
+## -------------------------------------------------------------------------- ##
+## DT
+## -------------------------------------------------------------------------- ##
+
+# calculate rmst (integrate step function)
+rmst_dt_time <- pred_dt %>%
+  group_by(complications) %>%
+  mutate(rmst = cumsum(prob_dt * diff(c(0, tend)))
+         , model = "dt") |>
+  select(-prob_dt)
+
+## merge results
+rmst_time <- rbind(rmst_km_time
+                   , rmst_pam_time
+                   , rmst_dt_time
+                   )
+
+gg_rmst_time <- ggplot(rmst_time, aes(x = tend, y = rmst)) +
+  geom_line(aes(color = model, linetype = complications), linewidth = linewidth) +
+  scale_color_manual(
+    name = "model",
+    values = c("km" = "black", "pam" = "firebrick2", "dt" = "steelblue", "pv" = "tan4"),
+    breaks = c("km" ,"pam", "dt", "pv"),
+    labels = c("KM" ,"PAM", "DT", "PV")
+  ) +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+gg_rmst_time
+
+## -------------------------------------------------------------------------- ##
+## Backup: Further plots
+## -------------------------------------------------------------------------- ##
+
+## PAM
 
 # calculate rmst (integrate step function)
 rmst_pam <- pred_pam %>%
   group_by(complications) %>%
   summarise(rmst = sum(prob_pam * diff(c(0, tend))))
 
-rmst_pam
-
 # transform into wide format for plotting area between survival curves
 pred_pam_wide <- pred_pam |> select(tend
-                                , complications
-                                , prob_pam) |>
+                                    , complications
+                                    , prob_pam) |>
   pivot_wider(names_from = complications
               , values_from = prob_pam) |>
   mutate(diff = abs(yes - no))
@@ -162,23 +222,22 @@ gg_rmst_pam <- ggplot(pred_pam_wide, aes(x = tend)) +
   # Ribbon for the shaded area
   geom_ribbon(aes(ymin = yes, ymax = no), fill = "grey", alpha = 0.2) +
   labs(y = "Survival Probability", x = "Time",
-        title = "RMST complications 'yes' and 'no'",
-        subtitle = "Grey area represents RMST difference") +
+       title = "RMST complications 'yes' and 'no'",
+       subtitle = "Grey area represents RMST difference") +
   theme_minimal() +
   theme(legend.position = "none")
 
+
 ## DT
-# calculate rmst (integrate step function)
+
 rmst_dt <- pred_dt %>%
   group_by(complications) %>%
   summarise(rmst = sum(prob_dt * diff(c(0, tend))))
 
-rmst_dt
-
 # transform into wide format for plotting area between survival curves
 pred_dt_wide <- pred_dt |> select(tend
-                                    , complications
-                                    , prob_dt) |>
+                                  , complications
+                                  , prob_dt) |>
   pivot_wider(names_from = complications
               , values_from = prob_dt) |>
   mutate(diff = abs(yes - no))
@@ -190,10 +249,7 @@ gg_rmst_dt <- ggplot(pred_dt_wide, aes(x = tend)) +
   # Ribbon for the shaded area
   geom_ribbon(aes(ymin = yes, ymax = no), fill = "grey", alpha = 0.2) +
   labs(y = "Survival Probability", x = "Time",
-        title = "RMST complications 'yes' and 'no'",
-        subtitle = "Grey area represents RMST difference") +
+       title = "RMST complications 'yes' and 'no'",
+       subtitle = "Grey area represents RMST difference") +
   theme_minimal() +
   theme(legend.position = "none")
-
-## merge results
-tbd
