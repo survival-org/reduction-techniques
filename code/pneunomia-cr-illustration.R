@@ -6,6 +6,8 @@ library(mgcv)
 library(pammtools)
 library(ggplot2)
 library(mvna)              # pneunomia data set
+library(etm)               # aalen johansen estimator
+library(cmprsk)            # needed for competing risks in etm, cf. Beyersmann p. 79
 theme_set(theme_bw())
 
 # load pneunomia data
@@ -13,20 +15,87 @@ data(sir.adm, package = "mvna")
 head(sir.adm)
 
 ## -------------------------------------------------------------------------- ##
-## Aalen-Johansen
+## Aalen-Johansen, following Beyersmann chapter 4.3
 ## -------------------------------------------------------------------------- ##
+tra <- matrix(FALSE, ncol = 3, nrow = 3)
+dimnames(tra) <- list(c("0", "1", "2"), c("0", "1", "2"))
+tra[1, 2:3] <- TRUE
+tra
 
+to <- ifelse(sir.adm$status==0
+             , "cens"
+             , ifelse(sir.adm$status==1,2,1)
+)
+my.sir.data <- data.frame(id=sir.adm$id
+                          , from=0
+                          , to
+                          , time=sir.adm$time
+                          , pneu=sir.adm$pneu
+)
+
+my.nelaal.nop <- mvna(my.sir.data[my.sir.data$pneu == 0, ]
+                      , c("0", "1", "2"), tra, "cens")
+my.nelaal.p <- mvna(my.sir.data[my.sir.data$pneu == 1, ]
+                    , c("0", "1", "2"), tra, "cens")
+
+my.sir.cif <- cuminc(my.sir.data$time
+                     , my.sir.data$to
+                     , group=my.sir.data$pneu
+                     , cencode="cens")
+
+my.sir.etm.nop <- etm(my.sir.data[my.sir.data$pneu == 0, ], c("0", "1", "2"), tra, "cens", s = 0)
+my.sir.etm.p <- etm(my.sir.data[my.sir.data$pneu == 1, ], c("0", "1", "2"), tra, "cens", s = 0)
+
+# use internal etm function to generate aj with confidence interval
+ls_aj_out <- list(nop = list(ci.transfo(my.sir.etm.nop, tr.choice = '0 1', transfo = "cloglog")
+                             , ci.transfo(my.sir.etm.nop, tr.choice = '0 2', transfo = "cloglog"))
+                  , p = list(ci.transfo(my.sir.etm.p, tr.choice = '0 1', transfo = "cloglog")
+                             , ci.transfo(my.sir.etm.p, tr.choice = '0 2', transfo = "cloglog"))
+)
+
+# build data frame for plotting
+ndf_cr_aj <- rbind(
+  data.frame(tend = ls_aj_out$p[[1]]$`0 1`$time
+             , cif = ls_aj_out$p[[1]]$`0 1`$P
+             , cif_lower = ls_aj_out$p[[1]]$`0 1`$lower
+             , cif_upper = ls_aj_out$p[[1]]$`0 1`$upper
+             , cause = 1
+             , pneu = 0),
+  data.frame(tend = ls_aj_out$p[[2]]$`0 2`$time
+             , cif = ls_aj_out$p[[2]]$`0 2`$P
+             , cif_lower = ls_aj_out$p[[2]]$`0 2`$lower
+             , cif_upper = ls_aj_out$p[[2]]$`0 2`$upper
+             , cause = 2
+             , pneu = 0),
+  data.frame(tend = ls_aj_out$nop[[1]]$`0 1`$time
+             , cif = ls_aj_out$nop[[1]]$`0 1`$P
+             , cif_lower = ls_aj_out$nop[[1]]$`0 1`$lower
+             , cif_upper = ls_aj_out$nop[[1]]$`0 1`$upper
+             , cause = 1
+             , pneu = 1),
+  data.frame(tend = ls_aj_out$nop[[2]]$`0 2`$time
+             , cif = ls_aj_out$nop[[2]]$`0 2`$P
+             , cif_lower = ls_aj_out$nop[[2]]$`0 2`$lower
+             , cif_upper = ls_aj_out$nop[[2]]$`0 2`$upper
+             , cause = 2
+             , pneu = 1)
+) |>
+  mutate(
+    cause = factor(cause, labels = c("Death", "Discharge"))
+    , pneu = factor(pneu, labels = c("Pneumonia", "No Pneumonia"))
+    , model = "AJ"
+  )
 
 ## -------------------------------------------------------------------------- ##
 ## PAM, ndf_cr can be used for DT as well
 ## -------------------------------------------------------------------------- ##
 
 # create ped data set
-ped_cr <- as_ped(sir.adm, Surv(time, status)~ pneu, combine = TRUE) |>
+ped_cr <- as_ped(sir.adm, Surv(time, status)~ ., combine = TRUE) |>
   mutate(cause = as.factor(cause))
 
 # estimate pam
-pam <- pamm(ped_status ~ s(tend, by = cause) + cause*pneu, data = ped_cr)
+pam <- pamm(ped_status ~ s(tend, by = cause) + s(tend, by = pneu) + cause*pneu, data = ped_cr)
 
 # build new data frame including cif for pam
 ndf_cr <- ped_cr |> 
@@ -35,6 +104,7 @@ ndf_cr <- ped_cr |>
 ndf_cr_pam <- ndf_cr |>
   group_by(cause, pneu) |> # important!
   add_cif(pam) |> ungroup() |>
+  select(tend, pneu, cause, cif, cif_lower, cif_upper) |>
   mutate(
     cause = factor(cause, labels = c("Discharge", "Death")),
     pneu = factor(pneu, labels = c("No Pneumonia", "Pneumonia")),
@@ -51,11 +121,19 @@ ndf_cr_pam <- ndf_cr |>
 ## -------------------------------------------------------------------------- ##
 
 # visualize effect
+
+# combine all data sets
+ndf_cr <- rbind(ndf_cr_aj
+                , ndf_cr_pam)
+
 # tbd: include dt example with color "firebrick2" to be consistent
-ggplot(ndf_cr_pam, aes(x = tend, y = cif, col = model)) + geom_line(aes(linetype = pneu, col = model)) +
+ggplot(ndf_cr, aes(x = tend, y = cif, col = model)) + geom_line(aes(linetype = pneu, col = model)) +
   geom_ribbon(aes(ymin = cif_lower, ymax = cif_upper, linetype = pneu, fill = model), alpha = .3) +
-  facet_wrap(~cause) + labs(y = "CIF", x = "time", color = "Model", fill = "Model") +
-  scale_color_manual(values = c("firebrick2", "steelblue", "tan4"))
-  
-  
+  facet_wrap(~cause) + 
+  labs(y = "CIF", x = "time", color = "Model", fill = "Model") +
+  scale_color_manual(values = c("grey", "firebrick2", "steelblue", "tan4")) +
+  scale_fill_manual(values = c("grey", "firebrick2", "steelblue", "tan4")) +
+  xlim(c(0,100))
+
+
 
