@@ -59,7 +59,7 @@ for(it in 1:length(potsurv$time)){
 }
 longpbc3.3 <- longpbc3[order(longpbc3$id),]
 pv <- geese(
-    formula = pseudo ~ as.factor(tpseudo), # how to add stratification according to complications?
+    formula = pseudo ~ as.factor(tpseudo) + complications, # how to add stratification according to complications?
     id=id,
     data=longpbc3.3,
     mean.link="cloglog",
