@@ -11,12 +11,21 @@ library(etm)               # aalen johansen estimator
 library(cmprsk)            # needed for competing risks in etm, cf. Beyersmann p. 79
 theme_set(theme_bw())
 
-setwd("C:/Users/ra56yaf/Desktop/Projects/StaBLab/Survival Analysis/survival_reductionTechniques/reduction-techniques/code") # set wd here!!!
-source("functions/etm-ci-trafo.R")
+#setwd("C:/Users/ra56yaf/Desktop/Projects/StaBLab/Survival Analysis/survival_reductionTechniques/reduction-techniques/code") # set wd here!!!
+setwd("C:/Users/ra63liw/Documents/98_git/reduction-techniques")
+source("code/functions/etm-ci-trafo.R")
 
 # load pneunomia data
 data(sir.adm, package = "mvna")
 head(sir.adm)
+
+# create ped data set
+ped_cr <- as_ped(sir.adm, Surv(time, status)~ ., combine = TRUE) |>
+  mutate(cause = as.factor(cause), pneu = as.factor(pneu))
+ndf_cr <- ped_cr |>
+  make_newdata(tend = unique(tend), pneu = unique(pneu), cause = unique(cause))
+
+
 
 ## -------------------------------------------------------------------------- ##
 ## Aalen-Johansen, following Beyersmann chapter 4.3
@@ -166,4 +175,96 @@ ggplot(ndf_cr_combined, aes(x = tend, y = cif, col = model)) + geom_line(aes(lin
   xlim(c(0,100)) + 
   ylim(c(0,1))
 
+## compare with transition probabilities
+# required: multi state branch
+setwd("C:/Users/ra63liw/Documents/98_git/pammtools-multi-state/pammtools")
+devtools::load_all()
+
+msm.sir.adm <- sir.adm |> mutate(from = 0
+                                 , to = ifelse(status != 0, status, 1)
+                                 , transition = ifelse(status != 0, paste0("0->", status), "0->1")
+                                 , status = ifelse(status==0, 0, 1)
+                                 , tstart = 0
+                                 , tstop = time)
+table(msm.sir.adm$transition)
+table(msm.sir.adm$from, msm.sir.adm$to)
+msm.sir.adm <- msm.sir.adm |> add_counterfactual_transitions()
+
+table(msm.sir.adm$transition)
+
+ped_msm <- as_ped_multistate(
+  data       = msm.sir.adm,
+  formula    = Surv(tstart, tstop, status)~ .,
+  transition = "transition",
+  id         = "id",
+  censor_code = 0,
+  timescale  = "calendar")
+
+pam_msm <- gam(
+  formula = ped_status ~ s(tend, by = interaction(transition, as.factor(pneu))) + transition*as.factor(pneu),
+  data = ped_msm,
+  family = poisson(link = "log"),
+  offset = offset)
+
+summary(pam_msm)
+
+ndf_msm <- ped_msm |>
+  make_newdata(tend = unique(tend)
+               , transition = unique(transition)
+               , pneu = as.factor(unique(pneu))
+               ) |>
+  group_by(transition, pneu) |>
+  add_trans_prob(pam_msm)
+
+ndf_cr_msm <- ndf_msm |>
+  rename(cif = trans_prob) |>
+  mutate(cif_lower = NA
+         , cif_upper = NA
+         , cause = ifelse(transition == "0->1", "Discharge", "Death")
+         , model = "msm"
+         , pneu = ifelse(pneu == "0", "No Pneumonia", "Pneumonia")) |>
+  ungroup() |>
+  select(tend
+         , cif
+         , cif_lower
+         , cif_upper
+         , cause
+         , pneu
+         , model)
+
+# visualize effect
+
+# combine all data sets
+ndf_cr_combined <- rbind(ndf_cr_aj, ndf_cr_pam, ndf_cr_msm)
+
+# tbd: include pam example with color "firebrick2" to be consistent
+ggplot(ndf_cr_combined, aes(x = tend, y = cif, col = model)) + geom_line(aes(linetype = pneu, col = model)) +
+  geom_ribbon(aes(ymin = cif_lower, ymax = cif_upper, linetype = pneu, fill = model), alpha = .3) +
+  facet_wrap(~cause) +
+  labs(y = "CIF", x = "time", color = "Model", fill = "Model") +
+  scale_color_manual(
+    name = "model",
+    values = c("pam" = "firebrick2", "msm" = "steelblue", "km" = "black"),
+    breaks = c("pam", "msm", "km"),
+    labels = c("PAM", "MSM", "KM")
+  ) +
+  scale_fill_manual(
+    name = "model",
+    values = c("pam" = "firebrick2", "msm" = "steelblue", "km" = "black"),
+    breaks = c("pam", "msm", "km"),
+    labels = c("PAM", "MSM", "KM")) +
+  labs(
+    x = "Time",
+    y = "Cumulative Incidence Function"
+  ) +
+  theme_minimal(base_size = label_size) +
+  theme(
+    axis.title = element_text(size = label_size),
+    axis.text = element_text(size = label_size),
+    legend.text = element_text(size = label_size),
+    legend.position = "right"
+  ) +
+  ylim(c(0,1))
+
+# msm method using transition probabilites works better than add_cif.
 

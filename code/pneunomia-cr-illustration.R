@@ -15,6 +15,10 @@ theme_set(theme_bw())
 setwd("C:/Users/ra63liw/Documents/98_git/reduction-techniques")
 source("code/functions/etm-ci-trafo.R")
 
+# required: multi state branch for transition probability calculation
+setwd("C:/Users/ra63liw/Documents/98_git/pammtools-multi-state/pammtools")
+devtools::load_all()
+
 # load pneunomia data
 data(sir.adm, package = "mvna")
 head(sir.adm)
@@ -118,6 +122,56 @@ ndf_cr_pam <- ndf_cr |>
   ) |>
   select(tend, pneu, cause, cif, cif_lower, cif_upper, model)
 
+## compare with transition probabilities
+msm.sir.adm <- sir.adm |> mutate(from = 0
+                                 , to = ifelse(status != 0, status, 1)
+                                 , transition = ifelse(status != 0, paste0("0->", status), "0->1")
+                                 , status = ifelse(status==0, 0, 1)
+                                 , tstart = 0
+                                 , tstop = time)
+
+msm.sir.adm <- msm.sir.adm |> add_counterfactual_transitions()
+
+ped_msm <- as_ped_multistate(
+  data       = msm.sir.adm,
+  formula    = Surv(tstart, tstop, status)~ .,
+  transition = "transition",
+  id         = "id",
+  censor_code = 0,
+  timescale  = "calendar")
+
+pam_msm <- gam(
+  formula = ped_status ~ s(tend, by = interaction(transition, as.factor(pneu))) + transition*as.factor(pneu),
+  data = ped_msm,
+  family = poisson(link = "log"),
+  offset = offset)
+
+summary(pam_msm)
+
+ndf_msm <- ped_msm |>
+  make_newdata(tend = unique(tend)
+               , transition = unique(transition)
+               , pneu = as.factor(unique(pneu))
+  ) |>
+  group_by(transition, pneu) |>
+  add_trans_prob(pam_msm)
+
+ndf_cr_msm <- ndf_msm |>
+  rename(cif = trans_prob) |>
+  mutate(cif_lower = NA
+         , cif_upper = NA
+         , cause = ifelse(transition == "0->1", "Discharge", "Death")
+         , model = "pam"
+         , pneu = ifelse(pneu == "0", "No Pneumonia", "Pneumonia")) |>
+  ungroup() |>
+  select(tend
+         , cif
+         , cif_lower
+         , cif_upper
+         , cause
+         , pneu
+         , model)
+
 ## -------------------------------------------------------------------------- ##
 ## Discrete Time
 ## -------------------------------------------------------------------------- ##
@@ -166,7 +220,10 @@ ndf_cr_dt <- ndf_cr_dt_wide %>%
 # visualize effect
 
 # combine all data sets
-ndf_cr_combined <- rbind(ndf_cr_aj, ndf_cr_pam, ndf_cr_dt)
+ndf_cr_combined <- rbind(ndf_cr_aj
+                         # , ndf_cr_pam # exclude due to bias --> prob bug in cr calculation
+                         , ndf_cr_msm
+                         , ndf_cr_dt)
 
 # tbd: include dt example with color "firebrick2" to be consistent
 ggplot(ndf_cr_combined, aes(x = tend, y = cif, col = model)) + geom_line(aes(linetype = pneu, col = model)) +
