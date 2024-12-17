@@ -16,7 +16,7 @@ setwd("C:/Users/ra63liw/Documents/98_git/reduction-techniques")
 source("code/functions/etm-ci-trafo.R")
 
 # required: multi state branch for transition probability calculation
-setwd("C:/Users/ra63liw/Documents/98_git/pammtools-multi-state/pammtools")
+setwd("C:/Users/ra63liw/Documents/98_git/pammtools-multi-state/pammtools") # set pammtools multi state branch here!!!
 devtools::load_all()
 
 # load pneunomia data
