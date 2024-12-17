@@ -92,7 +92,7 @@ ndf_cr_aj <- rbind(
   mutate(
     cause = factor(cause, labels = c("Death", "Discharge"))
     , pneu = factor(pneu, labels = c("Pneumonia", "No Pneumonia"))
-    , model = "AJ"
+    , model = "aj"
   )
 
 ## -------------------------------------------------------------------------- ##
@@ -232,15 +232,15 @@ ggplot(ndf_cr_combined, aes(x = tend, y = cif, col = model)) + geom_line(aes(lin
   labs(y = "CIF", x = "time", color = "Model", fill = "Model") +
   scale_color_manual(
     name = "model",
-    values = c("pam" = "firebrick2", "dt" = "steelblue", "km" = "black"),
-    breaks = c("pam", "dt", "km"),
-    labels = c("PAM", "DT", "KM")
+    values = c("pam" = "firebrick2", "dt" = "steelblue", "aj" = "black"),
+    breaks = c("pam", "dt", "aj"),
+    labels = c("PAM", "DT", "AJ")
   ) +
   scale_fill_manual(
     name = "model",
-    values = c("pam" = "firebrick2", "dt" = "steelblue", "km" = "black"),
-    breaks = c("pam", "dt", "km"),
-    labels = c("PAM", "DT", "KM")) +
+    values = c("pam" = "firebrick2", "dt" = "steelblue", "aj" = "black"),
+    breaks = c("pam", "dt", "aj"),
+    labels = c("PAM", "DT", "AJ")) +
   labs(
     x = "Time",
     y = "Cumulative Incidence Function"
