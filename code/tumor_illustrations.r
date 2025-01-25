@@ -9,11 +9,10 @@ library(geepack)
 library(ggplot2)
 
 # initialize variables
-setwd("C:/Users/ra63liw/Documents/98_git/reduction-techniques")                                   # !! set wd individually !!
+# setwd("C:/Users/ra56yaf/Desktop/Projects/StaBLab/Survival Analysis/survival_reductionTechniques/reduction-techniques")
+setwd("C:/Users/ra63liw/Documents/98_git/reduction-techniques")
 linewidth = 1
 label_size = 24
-
-
 
 # load data
 data("tumor", package = "pammtools")
@@ -121,15 +120,21 @@ gg_survCurves <- ggplot(pred_long, aes(x = tend, y = prob)) +
   geom_line(aes(color = model, linetype = complications), linewidth = linewidth) +
   geom_stephazard(data = km_df, aes(linetype = complications, color = "km"), linewidth = linewidth) +
   geom_ribbon(data = km_df, aes(ymin = km_low, ymax = km_high, fill = complications), alpha = .3, color = NA) +
+  scale_y_continuous(limits = c(0, 1), breaks = seq(0,1,by=0.25)) +
   scale_color_manual(
     name = "model",
     values = c("pam" = "firebrick2", "dt" = "steelblue", "km" = "black"),
     breaks = c("pam", "dt", "km"),
     labels = c("PAM", "DT", "KM")
   ) +
+  scale_linetype_manual(
+    name = "complications",
+    values = c("yes" = "solid", "no" = "dashed"),
+    breaks = c("yes", "no")
+  ) +
   scale_fill_manual(values = c("no" = "darkgrey", "yes" = "darkgrey")) +
   labs(
-    x = "Time",
+    x = "Time (in Days)",
     y = "Survival Probability"
   ) +
   theme_minimal(base_size = label_size) +
@@ -137,11 +142,17 @@ gg_survCurves <- ggplot(pred_long, aes(x = tend, y = prob)) +
     axis.title = element_text(size = label_size),
     axis.text = element_text(size = label_size),
     legend.text = element_text(size = label_size),
-    legend.position = "right"
+    legend.position = "right",
+    legend.box = "vertical"
+  ) +
+  guides(
+    color = guide_legend(order = 1),
+    linetype = guide_legend(order = 2),
+    fill = "none"
   )
 
 gg_survCurves
-ggsave("figures/survival_curves.png", gg_survCurves, width = 10, height = 6, dpi = 300) # TBD: add PV (whole curves or only points?) as dark orange/brown
+ggsave("figures/tumor_survivalCurves.png", gg_survCurves, width = 10, height = 6, dpi = 300) # TBD: add PV (whole curves or only points?) as dark orange/brown
 
 ## -------------------------------------------------------------------------- ##
 # RMST

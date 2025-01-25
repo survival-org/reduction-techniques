@@ -11,13 +11,18 @@ library(etm)               # aalen johansen estimator
 library(cmprsk)            # needed for competing risks in etm, cf. Beyersmann p. 79
 theme_set(theme_bw())
 
-#setwd("C:/Users/ra56yaf/Desktop/Projects/StaBLab/Survival Analysis/survival_reductionTechniques/reduction-techniques/code") # set wd here!!!
-setwd("C:/Users/ra63liw/Documents/98_git/reduction-techniques")
+setwd("C:/Users/ra56yaf/Desktop/Projects/StaBLab/Survival Analysis/survival_reductionTechniques/reduction-techniques")
+# setwd("C:/Users/ra63liw/Documents/98_git/reduction-techniques")
 source("code/functions/etm-ci-trafo.R")
 
 # required: multi state branch for transition probability calculation
-setwd("C:/Users/ra63liw/Documents/98_git/pammtools-multi-state/pammtools") # set pammtools multi state branch here!!!
-devtools::load_all()
+# setwd("C:/Users/ra63liw/Documents/98_git/pammtools-multi-state/pammtools") # set pammtools multi state branch here!!!
+# devtools::load_all()
+library(pammtools)
+
+# initialize variables
+linewidth = 1
+label_size = 24
 
 # load pneunomia data
 data(sir.adm, package = "mvna")
@@ -226,23 +231,23 @@ ndf_cr_combined <- rbind(ndf_cr_aj
                          , ndf_cr_dt)
 
 # tbd: include dt example with color "firebrick2" to be consistent
-ggplot(ndf_cr_combined, aes(x = tend, y = cif, col = model)) + geom_line(aes(linetype = pneu, col = model)) +
+gg_survCurves <- ggplot(ndf_cr_combined, aes(x = tend, y = cif)) +
+  geom_line(aes(color = model, linetype = pneu), linewidth = linewidth) +
   geom_ribbon(aes(ymin = cif_lower, ymax = cif_upper, linetype = pneu, fill = model), alpha = .3) +
   facet_wrap(~cause) +
-  labs(y = "CIF", x = "time", color = "Model", fill = "Model") +
+  scale_y_continuous(limits = c(0, 1), breaks = seq(0,1,by=0.25)) +
   scale_color_manual(
     name = "model",
     values = c("pam" = "firebrick2", "dt" = "steelblue", "aj" = "black"),
     breaks = c("pam", "dt", "aj"),
-    labels = c("PAM", "DT", "AJ")
-  ) +
-  scale_fill_manual(
-    name = "model",
-    values = c("pam" = "firebrick2", "dt" = "steelblue", "aj" = "black"),
-    breaks = c("pam", "dt", "aj"),
     labels = c("PAM", "DT", "AJ")) +
+  scale_linetype_discrete(
+    name   = "pneumonia",
+    labels = c("Pneumonia" = "yes", "No Pneumonia" = "no")
+  ) +
+  scale_fill_manual(values = c("pam" = "darkgrey", "dt" = "darkgrey", "aj" = "darkgrey")) +
   labs(
-    x = "Time",
+    x = "Time (in Days)",
     y = "Cumulative Incidence Function"
   ) +
   theme_minimal(base_size = label_size) +
@@ -250,10 +255,16 @@ ggplot(ndf_cr_combined, aes(x = tend, y = cif, col = model)) + geom_line(aes(lin
     axis.title = element_text(size = label_size),
     axis.text = element_text(size = label_size),
     legend.text = element_text(size = label_size),
-    legend.position = "right"
-  ) +
-  xlim(c(0,100)) + 
-  ylim(c(0,1))
+    legend.position = "right",
+    panel.spacing.x = unit(2, "lines")) +
+  coord_cartesian(xlim = c(1, 100)) +
+  guides(
+    color = guide_legend(order = 1),
+    linetype = guide_legend(order = 2, override.aes = list(fill = NA)),
+    fill = "none"
+  )
 
+gg_survCurves
+ggsave("figures/icu_survivalCurves.png", gg_survCurves, width = 10, height = 6, dpi = 300) # TBD: add PV (whole curves or only points?) as dark orange/brown
 
 
