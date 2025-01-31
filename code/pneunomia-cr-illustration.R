@@ -265,6 +265,6 @@ gg_survCurves <- ggplot(ndf_cr_combined, aes(x = tend, y = cif)) +
   )
 
 gg_survCurves
-ggsave("figures/icu_survivalCurves.png", gg_survCurves, width = 10, height = 6, dpi = 300) # TBD: add PV (whole curves or only points?) as dark orange/brown
+ggsave("figures/sir.adm_survivalCurves.png", gg_survCurves, width = 10, height = 6, dpi = 300) # TBD: add PV (whole curves or only points?) as dark orange/brown
 
 

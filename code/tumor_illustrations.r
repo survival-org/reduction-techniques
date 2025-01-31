@@ -9,10 +9,10 @@ library(geepack)
 library(ggplot2)
 
 # initialize variables
-# setwd("C:/Users/ra56yaf/Desktop/Projects/StaBLab/Survival Analysis/survival_reductionTechniques/reduction-techniques")
-setwd("C:/Users/ra63liw/Documents/98_git/reduction-techniques")
-linewidth = 1
-label_size = 24
+setwd("C:/Users/ra56yaf/Desktop/Projects/StaBLab/Survival Analysis/survival_reductionTechniques/reduction-techniques")
+# setwd("C:/Users/ra63liw/Documents/98_git/reduction-techniques")
+linewidth <- 1
+label_size <- 24
 
 # load data
 data("tumor", package = "pammtools")
@@ -67,13 +67,14 @@ pv <- geese(
 
 # survival curves ----
 new_data <- tumor_partitioned %>%
-  make_newdata(tend = unique(tend), complications = unique(complications))
+  make_newdata(tend = unique(tend), complications = unique(complications)) %>%
+  mutate(complications = factor(complications, levels = c("yes", "no")))
 
 ## KM
 km_df <- broom::tidy(km) %>%
   mutate(
     model = "km",
-    complications = ifelse(strata=="complications=yes", "yes", "no")
+    complications = factor(ifelse(strata=="complications=yes", "yes", "no"), levels = c("yes", "no"))
   ) %>%
   select(tend=time, prob=estimate, km_low=conf.low, km_high=conf.high, complications, model)
 
@@ -120,6 +121,7 @@ gg_survCurves <- ggplot(pred_long, aes(x = tend, y = prob)) +
   geom_line(aes(color = model, linetype = complications), linewidth = linewidth) +
   geom_stephazard(data = km_df, aes(linetype = complications, color = "km"), linewidth = linewidth) +
   geom_ribbon(data = km_df, aes(ymin = km_low, ymax = km_high, fill = complications), alpha = .3, color = NA) +
+  coord_cartesian(xlim = c(0, 3000)) + # because last event is at t=3034
   scale_y_continuous(limits = c(0, 1), breaks = seq(0,1,by=0.25)) +
   scale_color_manual(
     name = "model",
@@ -127,11 +129,11 @@ gg_survCurves <- ggplot(pred_long, aes(x = tend, y = prob)) +
     breaks = c("pam", "dt", "km"),
     labels = c("PAM", "DT", "KM")
   ) +
-  scale_linetype_manual(
-    name = "complications",
-    values = c("yes" = "solid", "no" = "dashed"),
-    breaks = c("yes", "no")
-  ) +
+  # scale_linetype_discrete(
+  #   name = "complications",
+  #   # values = c("yes" = "solid", "no" = "dashed"),
+  #   labels = c("yes", "no")
+  # ) +
   scale_fill_manual(values = c("no" = "darkgrey", "yes" = "darkgrey")) +
   labs(
     x = "Time (in Days)",
@@ -210,18 +212,64 @@ rmst_time <- rbind(rmst_km_time
 # plot rmst over time
 gg_rmst_time <- ggplot(rmst_time, aes(x = tend, y = rmst)) +
   geom_line(aes(color = model, linetype = complications), linewidth = linewidth) +
+  coord_cartesian(xlim = c(0, 3000)) + # because last event is at t=3034
   scale_color_manual(
     name = "model",
-    values = c("km" = "black", "pam" = "firebrick2", "dt" = "steelblue", "pv" = "tan4"),
-    breaks = c("km" ,"pam", "dt", "pv"),
-    labels = c("KM" ,"PAM", "DT", "PV")
+    # values = c("km" = "black", "pam" = "firebrick2", "dt" = "steelblue", "pv" = "tan4"),
+    values = c("pam" = "firebrick2", "dt" = "steelblue", "km" = "black"),
+    breaks = c("pam", "dt", "km"),
+    labels = c("PAM", "DT", "KM")
   ) +
-  theme_minimal() +
-  theme(legend.position = "right")
+  labs(
+    x = "Time (in Days)",
+    y = "RMST"
+  ) +
+  theme_minimal(base_size = label_size) +
+  theme(
+    axis.title = element_text(size = label_size),
+    axis.text = element_text(size = label_size),
+    legend.text = element_text(size = label_size),
+    legend.position = "right",
+    legend.box = "vertical"
+  ) +
+  guides(
+    color = guide_legend(order = 1),
+    linetype = guide_legend(order = 2),
+    fill = "none"
+  )
 
 gg_rmst_time
-ggsave("figures/rmst_over_time.png", gg_rmst_time, width = 10, height = 6, dpi = 300)
+ggsave("figures/tumor_rmst.png", gg_rmst_time, width = 10, height = 6, dpi = 300)
 
+
+## -------------------------------------------------------------------------- ##
+## Combine Survival Curves Plot with RMST Plot
+## -------------------------------------------------------------------------- ##
+
+# horizontal alignment
+library(patchwork)
+gg_tumor <- gg_survCurves + theme(legend.position = "none") + gg_rmst_time + plot_layout(guides = "collect")
+
+# vertical alignment
+gg_survCurves_adj <- gg_survCurves +
+  theme(legend.position = "none",
+        axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank())
+
+gg_rmst_time_adj <- gg_rmst_time +
+  theme(
+    legend.position = "bottom",
+    # legend.box = "horizontal", # uncomment to have both legend items next to each other
+    legend.direction = "horizontal",
+    legend.spacing.y = unit(0, "cm") # decreases vertical gap between lines
+  )
+
+gg_tumor <- gg_survCurves_adj / plot_spacer() / gg_rmst_time_adj +
+  plot_layout(heights = c(1, 0.1, 1))
+
+gg_tumor
+ggsave("figures/tumor_combined.png", gg_tumor, width = 8, height = 10, dpi = 300)
 
 ## -------------------------------------------------------------------------- ##
 ## Backup: Further plots
