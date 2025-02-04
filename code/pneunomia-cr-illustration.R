@@ -228,7 +228,8 @@ ndf_cr_dt <- ndf_cr_dt_wide %>%
 ndf_cr_combined <- rbind(ndf_cr_aj
                          # , ndf_cr_pam # exclude due to bias --> prob bug in cr calculation
                          , ndf_cr_msm
-                         , ndf_cr_dt)
+                         , ndf_cr_dt) %>%
+  mutate(cause = factor(cause, levels = c("Discharge", "Death"))) # to ensure correct order in plot
 
 # tbd: include dt example with color "firebrick2" to be consistent
 gg_survCurves <- ggplot(ndf_cr_combined, aes(x = tend, y = cif)) +
