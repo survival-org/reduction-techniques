@@ -8,7 +8,6 @@ library(pseudo)
 library(geepack)
 library(ggplot2)
 library(doBy)
-library(glmtoolbox)
 
 # initiagee# initialize variables
 #setwd("C:/Users/ra63liw/Documents/98_git/reduction-techniques")                                   # !! set wd individually !!
@@ -45,7 +44,11 @@ pam <- pamm(
   formula = ped_status ~ s(tend, by = complications) + complications,
   data = tumor_partitioned)
 
-## PV
+
+## -------------------------------------------------------------------------- ##
+## PV - Léa
+## -------------------------------------------------------------------------- ##
+
 ### add a patID variable in the dataset 
 tumor$patID <- 1:length(tumor$days)
 
@@ -201,6 +204,21 @@ predict_pv_RMST <- function (time, complication){
 }
 ### test
 predict_pv_RMST(time = 1000, complication = 'yes')
+predict_pv_RMST(time = 1000, complication = 'no')
+
+## ---
+## difference in rmst can be taken directly from estimates in summary 
+time = 1000
+complication = 'yes'
+
+pv <- pseudomean(tumor$days, tumor$status, tmax = time)
+#One pseudo-value per patients
+tumor$rmst<-as.vector(pv)
+fit <- geese(rmst ~ complications + age + resection, data =tumor, id = patID, mean.link = "identity")
+fit_lm <- lm(rmst ~ complications + age + resection, data =tumor)
+summary(fit)
+summary(fit_lm)
+## ---
 
 
 # TBD
