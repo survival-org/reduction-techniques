@@ -106,7 +106,8 @@ pred_dt <- new_data %>%
 
 ## combine results
 pred <- pred_pam %>%
-    left_join(pred_dt, by = c("tend", "complications"))
+    left_join(pred_dt, by = c("tend", "complications"))%>%
+    left_join(pred_pv, by = c("tend", "complications"))
 
 pred_long <- pred %>%
   pivot_longer(
@@ -125,9 +126,9 @@ gg_survCurves <- ggplot(pred_long, aes(x = tend, y = prob)) +
   scale_y_continuous(limits = c(0, 1), breaks = seq(0,1,by=0.25)) +
   scale_color_manual(
     name = "model",
-    values = c("pam" = "firebrick2", "dt" = "steelblue", "km" = "black"),
-    breaks = c("pam", "dt", "km"),
-    labels = c("PAM", "DT", "KM")
+    values = c("pam" = "firebrick2", "dt" = "steelblue",'pv'='springgreen4', "km" = "black"),
+    breaks = c("pam", "dt", 'pv', "km"),
+    labels = c("PAM", "DT", 'PV', "KM")
   ) +
   # scale_linetype_discrete(
   #   name = "complications",
@@ -148,10 +149,36 @@ gg_survCurves <- ggplot(pred_long, aes(x = tend, y = prob)) +
     legend.box = "vertical"
   ) +
   guides(
-    color = guide_legend(order = 1),
-    linetype = guide_legend(order = 2),
-    fill = "none"
-  )
+    color = guide_legend(override.aes = list(shape = c(NA, NA, 16, NA),
+    linetype = c(1,1,NA,1)),
+    keywidth = 2)
+    )
+
+gg_survCurves <- ggplot(pred_long, aes(x = tend, y = prob)) +
+  geom_line(aes(color = model, linetype = complications), linewidth = linewidth) +
+  geom_point( data = pred_pv_long, aes(color = model)) +
+  geom_stephazard(data = km_df, aes(linetype = complications, color = "km"), linewidth = linewidth) +
+  geom_ribbon(data = km_df, aes(ymin = km_low, ymax = km_high, fill = complications), alpha = .3, color = NA) +
+  scale_color_manual(
+    name = "model",
+    values = c("pam" = "firebrick2", "dt" = "steelblue",'pv'='springgreen4', "km" = "black"),
+    breaks = c("pam", "dt", 'pv', "km"),
+    labels = c("PAM", "DT", 'PV', "KM")
+  ) +
+  scale_fill_manual(values = c("no" = "darkgrey", "yes" = "darkgrey")) +
+  labs(
+    x = "Time",
+    y = "Survival Probability"
+  ) +
+  theme_minimal(base_size = label_size) +
+  theme(
+    axis.title = element_text(size = label_size),
+    axis.text = element_text(size = label_size),
+    legend.text = element_text(size = label_size),
+    legend.position = "right"
+  )+
+  guides(color = guide_legend(override.aes = list(shape = c(NA,NA, 16, NA), linetype = c(1,1,NA,1)),#
+                              keywidth = 2))
 
 gg_survCurves
 ggsave("figures/tumor_survivalCurves.png", gg_survCurves, width = 10, height = 6, dpi = 300) # TBD: add PV (whole curves or only points?) as dark orange/brown
@@ -193,20 +220,41 @@ rmst_dt_time <- pred_dt %>%
 ## -------------------------------------------------------------------------- ##
 ## PV
 ## -------------------------------------------------------------------------- ##
+# need id for geese function
+tumor$patID <- 1:length(tumor$days)
 
-# TBD
+predict_pv_RMST <- function (time, complication){
+  #compute pseudo-value
+  pv <- pseudomean(tumor$days, tumor$status, tmax = time)
+  #One pseudo-value per patients
+  tumor$rmst<-as.vector(pv)
+  
+  ### Data analysis
+  fit <- geese(rmst ~ complications, data =tumor, id = patID, mean.link = "identity")
+  return(as.numeric(c(1,1*(complication == 'yes'))%*%fit$beta))
+}
+### test
+predict_pv_RMST(time = 1000, complication = 'yes')
+
 # table must contain
 # - time
 # - complications
 # - rmst
 # - model = "pv"
 
+rmst_pv_time = data.frame(tend = rep(cutpoints[2:length(cutpoints)],2), 
+                          complications = c(rep('yes', length(cutpoints)-1), rep('no', length(cutpoints)-1)), 
+                          model = rep('pv', 2*length(cutpoints)-2))
+
+rmst_pv_time$rmst = mapply(predict_pv_RMST, rmst_pv_time$tend, rmst_pv_time$complications) #may take a few seconds
+
+
 
 ## merge results
 rmst_time <- rbind(rmst_km_time
                    , rmst_pam_time
                    , rmst_dt_time
-                   #, rmst_pv_time
+                   , rmst_pv_time
                    )
 
 # plot rmst over time
@@ -215,10 +263,9 @@ gg_rmst_time <- ggplot(rmst_time, aes(x = tend, y = rmst)) +
   coord_cartesian(xlim = c(0, 3000)) + # because last event is at t=3034
   scale_color_manual(
     name = "model",
-    # values = c("km" = "black", "pam" = "firebrick2", "dt" = "steelblue", "pv" = "tan4"),
-    values = c("pam" = "firebrick2", "dt" = "steelblue", "km" = "black"),
-    breaks = c("pam", "dt", "km"),
-    labels = c("PAM", "DT", "KM")
+    values = c("km" = "black", "pam" = "firebrick2", "dt" = "steelblue", "pv" = "springgreen4"),
+    breaks = c("km" ,"pam", "dt", "pv"),
+    labels = c("KM" ,"PAM", "DT", "PV")
   ) +
   labs(
     x = "Time (in Days)",
@@ -232,10 +279,11 @@ gg_rmst_time <- ggplot(rmst_time, aes(x = tend, y = rmst)) +
     legend.position = "right",
     legend.box = "vertical"
   ) +
-  guides(
-    color = guide_legend(order = 1),
-    linetype = guide_legend(order = 2),
-    fill = "none"
+  guides(color = guide_legend(
+    override.aes = list(shape = c(NA,NA, NA, 16)
+    , linetype = c(1,1,1,NA))
+    , keywidth = 2
+    )
   )
 
 gg_rmst_time
