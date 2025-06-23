@@ -9,10 +9,11 @@ library(ggplot2)
 library(mvna)              # pneunomia data set
 library(etm)               # aalen johansen estimator
 library(cmprsk)            # needed for competing risks in etm, cf. Beyersmann p. 79
+library(pseudo)
 theme_set(theme_bw())
 
-setwd("C:/Users/ra56yaf/Desktop/Projects/StaBLab/Survival Analysis/survival_reductionTechniques/reduction-techniques")
-# setwd("C:/Users/ra63liw/Documents/98_git/reduction-techniques")
+# setwd("C:/Users/ra56yaf/Desktop/Projects/StaBLab/Survival Analysis/survival_reductionTechniques/reduction-techniques")
+setwd("C:/Users/ra63liw/Documents/98_git/reduction-techniques")
 source("code/functions/etm-ci-trafo.R")
 
 # required: multi state branch for transition probability calculation
@@ -222,31 +223,88 @@ ndf_cr_dt <- ndf_cr_dt_wide %>%
 ## Pseudo Obs
 ## -------------------------------------------------------------------------- ##
 
+## PV
+ci_pv_fun <- function (time, pneumonia, cause = 'Death'){
+  if(cause == 'Discharge'){
+    #compute pseudo-value
+    cipo <- pseudoci(sir.adm$time, sir.adm$status, tmax = time)
+    
+    #One pseudo-value per patients
+    sir.adm$pv<-as.vector(cipo$pseudo[[1]])
+    sir.adm$ipv<-as.vector(1-sir.adm$pv) # needed because the cloglog function implemented in geepack is log(log(1-x))
+    
+    ### Data analysis
+    ### Univariate analysis
+    fit <- geese(ipv ~ pneu, 
+                 data = sir.adm, id = id,  mean.link="cloglog",
+                 corstr="independence", family = gaussian())
+    return(as.numeric(exp(-exp(c(1,1*(pneumonia == 'Pneumonia'))%*%fit$beta))))
+  }else{
+    #compute pseudo-value
+    cipo <- pseudoci(sir.adm$time, sir.adm$status, tmax = time)
+    
+    #One pseudo-value per patients
+    sir.adm$pv<-as.vector(cipo$pseudo[[2]])
+    sir.adm$ipv<-as.vector(1-sir.adm$pv) # needed because the cloglog function implemented in geepack is log(log(1-x))
+    
+    ### Data analysis
+    ### Univariate analysis
+    fit <- geese(ipv ~ pneu, 
+                 data = sir.adm, id = id,  mean.link="cloglog",
+                 corstr="independence", family = gaussian())
+    return(as.numeric(exp(-exp(c(1,1*(pneumonia == 'Pneumonia'))%*%fit$beta))))
+  }
+}
+### test
+ci_pv_fun(time = 50, pneumonia = 'No Pneumonia', cause = 'Discharge')
+ci_pv_fun(time = 50, pneumonia = 'Pneumonia', cause = 'Death')
+
+mapply(ci_pv_fun, c(5, 130), 'yes')
+
+cutpoints = seq(5, 130, 1)
+ci_pv_data =  data.frame(tend = rep(cutpoints[2:length(cutpoints)],4), 
+                         pneumonia = c(rep('yes', length(cutpoints)-1), rep('no', length(cutpoints)-1),
+                                       rep('yes', length(cutpoints)-1), rep('no', length(cutpoints)-1)), 
+                         cause = c(rep('Discharge', 2*length(cutpoints) - 2), rep('no', 2*length(cutpoints) - 2)))
+
+ndf_cr_pv = ndf_cr_aj
+ndf_cr_pv$model = "pv"
+ndf_cr_pv$cif_lower = NA
+ndf_cr_pv$cif_upper = NA
+ndf_cr_pv$cif = NA
+ndf_cr_pv$cif = mapply(ci_pv_fun, ndf_cr_pv$tend, pneumonia = ndf_cr_pv$pneu, cause = ndf_cr_pv$cause) #may take a few seconds
+
 # visualize effect
 
 # combine all data sets
 ndf_cr_combined <- rbind(ndf_cr_aj
                          # , ndf_cr_pam # exclude due to bias --> prob bug in cr calculation
                          , ndf_cr_msm
-                         , ndf_cr_dt) %>%
+                         , ndf_cr_dt
+                         , ndf_cr_pv) %>%
   mutate(cause = factor(cause, levels = c("Discharge", "Death"))) # to ensure correct order in plot
 
 # tbd: include dt example with color "firebrick2" to be consistent
-gg_survCurves <- ggplot(ndf_cr_combined, aes(x = tend, y = cif)) +
+gg_survCurves <- ggplot(subset(ndf_cr_combined, model != "pv"), aes(x = tend, y = cif)) +
   geom_line(aes(color = model, linetype = pneu), linewidth = linewidth) +
   geom_ribbon(aes(ymin = cif_lower, ymax = cif_upper, linetype = pneu, fill = model), alpha = .3) +
+  geom_point(data = subset(ndf_cr_combined, model == "pv"),aes(color = model, shape = pneu)) +
   facet_wrap(~cause) +
   scale_y_continuous(limits = c(0, 1), breaks = seq(0,1,by=0.25)) +
   scale_color_manual(
     name = "model",
-    values = c("pam" = "firebrick2", "dt" = "steelblue", "aj" = "black"),
-    breaks = c("pam", "dt", "aj"),
-    labels = c("PAM", "DT", "AJ")) +
+    values = c("pam" = "firebrick2", "dt" = "steelblue", 'pv'='springgreen4', "aj" = "black"),
+    breaks = c("pam", "dt", 'pv',"aj"),
+    labels = c("PAM", "DT", 'PV',"AJ")) +
   scale_linetype_discrete(
     name   = "pneumonia",
     labels = c("Pneumonia" = "yes", "No Pneumonia" = "no")
   ) +
-  scale_fill_manual(values = c("pam" = "darkgrey", "dt" = "darkgrey", "aj" = "darkgrey")) +
+  scale_shape_discrete(
+    name   = "pneumonia",
+    labels = c("Pneumonia" = "yes", "No Pneumonia" = "no")
+  ) +
+  scale_fill_manual(values = c("pam" = "darkgrey", "dt" = "darkgrey", "pv" = "darkgrey", "aj" = "darkgrey")) +
   labs(
     x = "Time (in Days)",
     y = "Cumulative Incidence Function"
@@ -263,7 +321,10 @@ gg_survCurves <- ggplot(ndf_cr_combined, aes(x = tend, y = cif)) +
     color = guide_legend(order = 1),
     linetype = guide_legend(order = 2, override.aes = list(fill = NA)),
     fill = "none"
-  )
+  )+
+  guides(color = guide_legend(override.aes = list(shape = c(NA, NA, 16, NA), linetype = c(1,1,NA,1)),#
+                              keywidth = 2))
+
 
 gg_survCurves
 ggsave("figures/sir.adm_survivalCurves.png", gg_survCurves, width = 10, height = 6, dpi = 300) # TBD: add PV (whole curves or only points?) as dark orange/brown
