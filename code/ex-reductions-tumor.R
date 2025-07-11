@@ -57,25 +57,21 @@ rf_yes_complications = pred_rf$data$distr[2, ]
 # ============================================================================
 
 # Define PEM pipeline with XGBoost
-lrn_xgb_regr_depth2 = lrn(
-    id = 'regr.xgboost', 
-    nrounds = 1000, 
-    eta = 0.12, 
-    max_depth = 2, 
-    base_score = 1, # very important for poisson loss
-    objective = "count:poisson", 
-    lambda = 0)
-
-po_xgb_pem = po("encode", method = "treatment") %>>% 
-    lrn_xgb_regr_depth2 |>as_learner()
-ppl_xgb_pem = ppl(
-  "survtoregr_pem",
-  learner = po_xgb_pem,
+pipeline_pem_xgb = po("encode", method = "treatment") %>>% 
+    ppl(
+     "survtoregr_pem",
+    learner = lrn("regr.xgboost", 
+                nrounds = 1000, 
+                eta = 0.12, 
+                max_depth = 2, 
+                base_score = 1, # very important for poisson loss
+                objective = "count:poisson", 
+                lambda = 0),
   cut = cut,
-  graph_learner = TRUE)
+  graph_learner = TRUE) |> as_learner()
 
-ppl_xgb_pem$train(tsk_tumor)
-pred_xgb_PEM = ppl_xgb_pem$predict(tsk_tumor, row_ids = c(1,2))
+pipeline_pem_xgb$train(tsk_tumor)
+pred_xgb_PEM = pipeline_pem_xgb$predict(tsk_tumor)
 
 # Get predictions
 # Extract survival curves for each group
@@ -115,8 +111,6 @@ p_comparison = ggplot() +
   ylim(c(0, 1)) +
   labs(y = "Survival Probability", 
        x = "Time (days)",
-       title = "Survival Curves by Complications Status",
-       subtitle = "Comparison of Kaplan-Meier, Discrete Time RF, and PEM XGBoost") +
   scale_color_discrete(name = "Method") +
   scale_linetype_discrete(name = "Complications") +
   theme(legend.position = "bottom")
