@@ -142,7 +142,7 @@ ndf_cr_aj <- rbind(
 ## -------------------------------------------------------------------------- ##
 
 # create ped data set
-ped_cr <- as_ped(sir.adm, Surv(time, status)~ ., combine = TRUE) |>
+ped_cr <- as_ped(sir.adm, Surv(time, status)~ ., combine = TRUE, max_time = 150) |>
   mutate(cause = as.factor(cause), pneu = as.factor(pneu))
 
 # estimate pam
@@ -153,17 +153,17 @@ lrn_xgb_pem = po("encode", method = "treatment") %>>%
     lrn(
         'regr.xgboost', 
         nrounds = 1000, 
-        eta = 0.12, 
+        eta = 0.025, 
         max_depth = 3, 
         base_score = 1, # very important for poisson loss
-        objective = "count:poisson", 
-        lambda = 0) |> 
+        objective = "count:poisson") |> 
     as_learner()
 
 tsk_pneu = TaskRegr$new(
     id = "pneu", 
-    backend = select(ped_cr, ped_status, tend, cause, pneu), 
+    backend = select(ped_cr, ped_status, tend, cause, pneu, offset), 
     target = "ped_status")
+tsk_pneu$set_col_roles("offset", roles = "offset")
 lrn_xgb_pem$train(tsk_pneu)
 
 
@@ -174,8 +174,21 @@ ndf_cr <- ped_cr |>
 
 haz_xgb_pem = lrn_xgb_pem$predict_newdata(ndf_cr) |> as.data.table()
 ndf_cr_xgb_pem <- ndf_cr |> cbind(haz_xgb_pem = haz_xgb_pem[["response"]])
+ndf_cr_xgb_pem <- ndf_cr_xgb_pem |> 
+    add_hazard(pam, ci = FALSE) |> 
+    group_by(cause, pneu) |> 
+    arrange(tend)
+ndf_cr_xgb_pem <- ndf_cr_xgb_pem |> 
+    mutate(cumhaz = cumsum(hazard * intlen)) |> 
+    mutate(cumhaz_pem = cumsum(haz_xgb_pem * intlen))
 
-ndf_cr_xgb_pem <- ndf_cr_xgb_pem |>
-  group_by(pneu) |> 
-  get_cif_from_haz(haz_col = "haz_xgb_pem") |>
-  ungroup()
+ggplot(ndf_cr_xgb_pem, aes(x = tend, y = hazard)) + 
+    geom_line() + 
+    geom_line(aes(y = haz_xgb_pem), col = "red") + 
+    facet_grid(cause ~ pneu)
+
+
+ggplot(ndf_cr_xgb_pem, aes(x = tend, y = cumhaz)) + 
+    geom_line() + 
+    geom_line(aes(y = cumhaz_pem), col = "red") + 
+    facet_grid(cause ~ pneu)
