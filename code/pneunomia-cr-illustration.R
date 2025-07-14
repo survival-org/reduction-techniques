@@ -33,7 +33,7 @@ strokewidth = 1.5
 # model_colors <- c("pam" = "firebrick2", "dt" = "steelblue", "pv" = "springgreen4", "aj" = "black")
 model_colors <- c(
   "xgboost" = "#D55E00",   # vivid reddish-orange
-  "dt"  = "#0072B2",   # deep sky blue
+  "randforest"  = "#0072B2",   # deep sky blue
   "pv"  = "#009E73",   # bluish green (unchanged)
   "aj"  = "#000000"    # black (unchanged)
 )
@@ -167,11 +167,11 @@ ndf_cr_aj <- rbind(
 ## compare with transition probabilities
 
 # create ped data set
-ped_cr_xgboost <- as_ped(sir.adm, Surv(time, status)~ ., combine = TRUE, max_time = 150) |>
+ped_cr <- as_ped(sir.adm, Surv(time, status)~ ., combine = TRUE, max_time = 150) |>
   mutate(cause = as.factor(cause), pneu = as.factor(pneu))
 
 # estimate pam -> not used really, only placeholder for add_trans_prob to work.
-pam_msm <- pamm(ped_status ~ s(tend, by = interaction(cause, pneu)) + cause*pneu, data = ped_cr_xgboost)
+pam_msm <- pamm(ped_status ~ s(tend, by = interaction(cause, pneu)) + cause*pneu, data = ped_cr)
 
 # pem xgb 
 lrn_xgb_pem = po("encode", method = "treatment") %>>% 
@@ -192,7 +192,7 @@ tsk_pneu$set_col_roles("offset", roles = "offset")
 lrn_xgb_pem$train(tsk_pneu)
 
 # build new data frame including cif for pam
-ndf_cr_xgboost <- ped_cr_xgboost |>
+ndf_cr_xgboost <- ped_cr |>
   make_newdata(tend = unique(tend), pneu = unique(pneu), cause = unique(cause))
 
 # make hazard prediction
@@ -235,8 +235,27 @@ dt <- gam(
   data = ped_cr,
   family = binomial(link = "logit"))
 
-ndf_cr_dt_interim <- ndf_cr %>%
-    mutate(eta = predict(dt, newdata = ., type = "link"), hazard = exp(eta) / (1 + exp(eta))) # predict cause-specific hazards
+ped_cr_rf <- ped_cr |>
+  mutate(ped_status = as.factor(ped_status))
+
+tsk_pneu = TaskClassif$new(
+  id = "pneu", 
+  target = "ped_status",
+  backend = select(ped_cr_rf, ped_status, tend, cause, pneu))
+
+## include RF hazard calculation and prediction
+lrn_rf_dt = po("encode", method = "treatment") %>>% 
+  lrn("classif.ranger", num.trees=1000L) |> as_learner()
+lrn_rf_dt$predict_type <- "prob"
+
+# Train the pipeline
+lrn_rf_dt$train(tsk_pneu)
+
+ndf_cr <- ped_cr_rf |>
+  make_newdata(tend = unique(tend), pneu = unique(pneu), cause = unique(cause))
+
+haz_rf_dt = lrn_rf_dt$predict_newdata(ndf_cr)$prob |> as.data.table()
+ndf_cr_dt_interim <- ndf_cr |> cbind(hazard = haz_rf_dt[["1"]])
 
 ndf_cr_dt_wide <- ndf_cr_dt_interim %>%
   pivot_wider(names_from = cause, values_from = hazard, names_prefix = "hazard_", values_fill = 0) %>% # so each row contains all cause-specific hazards
@@ -251,7 +270,7 @@ ndf_cr_dt_wide <- ndf_cr_dt_interim %>%
   ) %>%
   ungroup()
 
-ndf_cr_dt <- ndf_cr_dt_wide %>%
+ndf_cr_rf_dt <- ndf_cr_dt_wide %>%
   select(tend, pneu, cif_1, cif_2) %>%
   pivot_longer(
     cols = starts_with("cif_"),
@@ -264,8 +283,9 @@ ndf_cr_dt <- ndf_cr_dt_wide %>%
     cif_upper = NA,
     cause = factor(cause, levels = c("1", "2"), labels = c("Discharge", "Death")),
     pneu = factor(pneu, labels = c("No Pneumonia", "Pneumonia")),
-    model = "dt"
+    model = "randforest"
   )
+
 
 ## -------------------------------------------------------------------------- ##
 ## Pseudo Obs
@@ -329,7 +349,7 @@ ndf_cr_combined <- rbind(ndf_cr_aj
                          # , ndf_cr_pam # exclude due to bias --> prob bug in cr calculation
                          # , ndf_cr_msm # exchanged pamm with xgboost approach
                          , ndf_cr_xgb_pem 
-                         , ndf_cr_dt
+                         , ndf_cr_rf_dt
                          , ndf_cr_pv) %>%
   mutate(cause = factor(cause, levels = c("Discharge", "Death"))) # to ensure correct order in plot
 
@@ -350,8 +370,8 @@ gg_survCurves <- ggplot(ndf_lines, aes(x = tend, y = cif)) +
   scale_color_manual(
     name = "Model:",
     values = model_colors,
-    breaks = c("xgboost", "dt", "pv", "aj"),
-    labels = c("XGBoost PEM", "DT", "PV", "AJ")
+    breaks = c("xgboost", "randforest", "pv", "aj"),
+    labels = c("XGBoost PEM", "Random Forest DT", "PV", "AJ")
   ) +
   scale_linetype_discrete(
     name   = "Pneumonia:",
@@ -362,7 +382,7 @@ gg_survCurves <- ggplot(ndf_lines, aes(x = tend, y = cif)) +
     name   = "Pneumonia:",
     labels = c("Pneumonia" = "yes", "No Pneumonia" = "no")
   ) +
-  scale_fill_manual(values = c("xgboost" = "darkgrey", "dt" = "darkgrey", "pv" = "darkgrey", "aj" = "darkgrey")) +
+  scale_fill_manual(values = c("xgboost" = "darkgrey", "randforest" = "darkgrey", "pv" = "darkgrey", "aj" = "darkgrey")) +
   labs(
     x = "Time (in Days)",
     y = "Cumulative Incidence Function"
