@@ -10,16 +10,16 @@ library(mvna)              # pneunomia data set
 library(etm)               # aalen johansen estimator
 library(cmprsk)            # needed for competing risks in etm, cf. Beyersmann p. 79
 library(pseudo)
+library(mlr3)
+library(mlr3learners)
+library(mlr3pipelines)
+library(mlr3proba)
 theme_set(theme_bw())
 
 # setwd("C:/Users/ra56yaf/Desktop/Projects/StaBLab/Survival Analysis/survival_reductionTechniques/reduction-techniques")
 setwd("C:/Users/ra63liw/Documents/98_git/reduction-techniques")
 source("code/functions/etm-ci-trafo.R")
 
-# required: multi state branch for transition probability calculation
-# setwd("C:/Users/ra63liw/Documents/98_git/pammtools-multi-state/pammtools") # set pammtools multi state branch here!!!
-# devtools::load_all()
-library(pammtools)
 
 ## initialize variables for plotting
 # fontsize
@@ -32,7 +32,7 @@ pointsize = 2
 strokewidth = 1.5
 # model_colors <- c("pam" = "firebrick2", "dt" = "steelblue", "pv" = "springgreen4", "aj" = "black")
 model_colors <- c(
-  "pam" = "#D55E00",   # vivid reddish-orange
+  "xgboost" = "#D55E00",   # vivid reddish-orange
   "dt"  = "#0072B2",   # deep sky blue
   "pv"  = "#009E73",   # bluish green (unchanged)
   "aj"  = "#000000"    # black (unchanged)
@@ -140,72 +140,83 @@ ndf_cr_aj <- rbind(
 ## -------------------------------------------------------------------------- ##
 ## PAM, ndf_cr can be used for DT as well
 ## -------------------------------------------------------------------------- ##
-
-# create ped data set
-ped_cr <- as_ped(sir.adm, Surv(time, status)~ ., combine = TRUE) |>
-  mutate(cause = as.factor(cause), pneu = as.factor(pneu))
-
-# estimate pam
-pam <- pamm(ped_status ~ s(tend, by = interaction(cause, pneu)) + cause*pneu, data = ped_cr)
-
-# build new data frame including cif for pam
-ndf_cr <- ped_cr |>
-  make_newdata(tend = unique(tend), pneu = unique(pneu), cause = unique(cause))
-
-ndf_cr_pam <- ndf_cr |>
-  group_by(cause, pneu) |> # important!
-  add_cif(pam, ci=F, time_var = "tend") |> ungroup() |>
-  mutate(
-    cif_lower = NA,
-    cif_upper = NA,
-    cause = factor(cause, labels = c("Discharge", "Death")),
-    pneu = factor(pneu, labels = c("No Pneumonia", "Pneumonia")),
-    model = "pam"
-  ) |>
-  select(tend, pneu, cause, cif, cif_lower, cif_upper, model)
+# 
+# # create ped data set
+# ped_cr <- as_ped(sir.adm, Surv(time, status)~ ., combine = TRUE) |>
+#   mutate(cause = as.factor(cause), pneu = as.factor(pneu))
+# 
+# # estimate pam
+# pam <- pamm(ped_status ~ s(tend, by = interaction(cause, pneu)) + cause*pneu, data = ped_cr)
+# 
+# # build new data frame including cif for pam
+# ndf_cr <- ped_cr |>
+#   make_newdata(tend = unique(tend), pneu = unique(pneu), cause = unique(cause))
+# 
+# ndf_cr_pam <- ndf_cr |>
+#   group_by(cause, pneu) |> # important!
+#   add_cif(pam, ci=F, time_var = "tend") |> ungroup() |>
+#   mutate(
+#     cif_lower = NA,
+#     cif_upper = NA,
+#     cause = factor(cause, labels = c("Discharge", "Death")),
+#     pneu = factor(pneu, labels = c("No Pneumonia", "Pneumonia")),
+#     model = "pam"
+#   ) |>
+#   select(tend, pneu, cause, cif, cif_lower, cif_upper, model)
 
 ## compare with transition probabilities
-msm.sir.adm <- sir.adm |> mutate(from = 0
-                                 , to = ifelse(status != 0, status, 1)
-                                 , transition = ifelse(status != 0, paste0("0->", status), "0->1")
-                                 , status = ifelse(status==0, 0, 1)
-                                 , tstart = 0
-                                 , tstop = time)
 
-msm.sir.adm <- msm.sir.adm |> add_counterfactual_transitions()
+# create ped data set
+ped_cr_xgboost <- as_ped(sir.adm, Surv(time, status)~ ., combine = TRUE, max_time = 150) |>
+  mutate(cause = as.factor(cause), pneu = as.factor(pneu))
 
-ped_msm <- as_ped_multistate(
-  data       = msm.sir.adm,
-  formula    = Surv(tstart, tstop, status)~ .,
-  transition = "transition",
-  id         = "id",
-  censor_code = 0,
-  timescale  = "calendar")
+# estimate pam -> not used really, only placeholder for add_trans_prob to work.
+pam_msm <- pamm(ped_status ~ s(tend, by = interaction(cause, pneu)) + cause*pneu, data = ped_cr_xgboost)
 
-pam_msm <- gam(
-  formula = ped_status ~ s(tend, by = interaction(transition, as.factor(pneu))) + transition*as.factor(pneu),
-  data = ped_msm,
-  family = poisson(link = "log"),
-  offset = offset)
+# pem xgb 
+lrn_xgb_pem = po("encode", method = "treatment") %>>% 
+  lrn(
+    'regr.xgboost', 
+    nrounds = 1000, 
+    eta = 0.025, 
+    max_depth = 3, 
+    base_score = 1, # very important for poisson loss
+    objective = "count:poisson") |> 
+  as_learner()
 
-summary(pam_msm)
+tsk_pneu = TaskRegr$new(
+  id = "pneu", 
+  backend = select(ped_cr, ped_status, tend, cause, pneu, offset), 
+  target = "ped_status")
+tsk_pneu$set_col_roles("offset", roles = "offset")
+lrn_xgb_pem$train(tsk_pneu)
 
-ndf_msm <- ped_msm |>
-  make_newdata(tend = unique(tend)
-               , transition = unique(transition)
-               , pneu = as.factor(unique(pneu))
-  ) |>
-  group_by(transition, pneu) |>
-  add_trans_prob(pam_msm)
+# build new data frame including cif for pam
+ndf_cr_xgboost <- ped_cr_xgboost |>
+  make_newdata(tend = unique(tend), pneu = unique(pneu), cause = unique(cause))
 
-ndf_cr_msm <- ndf_msm |>
+# make hazard prediction
+haz_xgb_pem = lrn_xgb_pem$predict_newdata(ndf_cr_xgboost) |> as.data.table()
+ndf_cr_xgb_pem <- ndf_cr_xgboost |> cbind(haz_xgb_pem = haz_xgb_pem[["response"]])
+
+# calculate cumu hazard
+ndf_cr_xgb_pem <- ndf_cr_xgb_pem |>
+  group_by(cause, pneu) |> 
+  mutate(cumu_hazard = cumsum(haz_xgb_pem * intlen))
+
+# restructure and calculate cifs
+ndf_cr_xgb_pem <- ndf_cr_xgb_pem |>
+  mutate(transition = ifelse(cause == 1, "1->2", "1->3")) |>
+  group_by(pneu, transition) |> 
+  add_trans_prob(pam, ci = FALSE) |> # object not used because ci = FaLSE and cumu_hazard in data set
+  ungroup() |>
   rename(cif = trans_prob) |>
   mutate(cif_lower = NA
-         , cif_upper = NA
-         , cause = ifelse(transition == "0->1", "Discharge", "Death")
-         , model = "pam"
-         , pneu = ifelse(pneu == "0", "No Pneumonia", "Pneumonia")) |>
-  ungroup() |>
+    , cif_upper = NA
+    , cause = factor(cause, labels = c("Discharge", "Death"))
+    , pneu = factor(pneu, labels = c("No Pneumonia", "Pneumonia"))
+    , model = "xgboost"
+  ) |>
   select(tend
          , cif
          , cif_lower
@@ -213,6 +224,7 @@ ndf_cr_msm <- ndf_msm |>
          , cause
          , pneu
          , model)
+
 
 ## -------------------------------------------------------------------------- ##
 ## Discrete Time
@@ -315,7 +327,8 @@ ndf_cr_pv$cif = mapply(ci_pv_fun, ndf_cr_pv$tend, pneumonia = ndf_cr_pv$pneu, ca
 # combine all data sets
 ndf_cr_combined <- rbind(ndf_cr_aj
                          # , ndf_cr_pam # exclude due to bias --> prob bug in cr calculation
-                         , ndf_cr_msm
+                         # , ndf_cr_msm # exchanged pamm with xgboost approach
+                         , ndf_cr_xgb_pem 
                          , ndf_cr_dt
                          , ndf_cr_pv) %>%
   mutate(cause = factor(cause, levels = c("Discharge", "Death"))) # to ensure correct order in plot
@@ -337,8 +350,8 @@ gg_survCurves <- ggplot(ndf_lines, aes(x = tend, y = cif)) +
   scale_color_manual(
     name = "Model:",
     values = model_colors,
-    breaks = c("pam", "dt", "pv", "aj"),
-    labels = c("PAM", "DT", "PV", "AJ")
+    breaks = c("xgboost", "dt", "pv", "aj"),
+    labels = c("XGBoost PEM", "DT", "PV", "AJ")
   ) +
   scale_linetype_discrete(
     name   = "Pneumonia:",
@@ -349,7 +362,7 @@ gg_survCurves <- ggplot(ndf_lines, aes(x = tend, y = cif)) +
     name   = "Pneumonia:",
     labels = c("Pneumonia" = "yes", "No Pneumonia" = "no")
   ) +
-  scale_fill_manual(values = c("pam" = "darkgrey", "dt" = "darkgrey", "pv" = "darkgrey", "aj" = "darkgrey")) +
+  scale_fill_manual(values = c("xgboost" = "darkgrey", "dt" = "darkgrey", "pv" = "darkgrey", "aj" = "darkgrey")) +
   labs(
     x = "Time (in Days)",
     y = "Cumulative Incidence Function"
