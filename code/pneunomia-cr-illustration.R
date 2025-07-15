@@ -230,6 +230,15 @@ ndf_cr_xgb_pem <- ndf_cr_xgb_pem |>
 ## Discrete Time
 ## -------------------------------------------------------------------------- ##
 
+# define equidistant cut points
+eventtimes <- unique(sort(sir.adm[sir.adm$status != 0, "time"]))
+cut <- sort(union(seq(from=1, to=150, by=10), eventtimes))
+# -> no effect
+
+# create ped data set
+ped_cr <- as_ped(sir.adm, Surv(time, status)~ ., combine = TRUE, max_time = 150, cut = cut) |>
+  mutate(cause = as.factor(cause), pneu = as.factor(pneu))
+
 dt <- gam(
   formula = ped_status ~ s(tend, by = interaction(cause, pneu)) + cause*pneu,
   data = ped_cr,
@@ -241,7 +250,7 @@ ped_cr_rf <- ped_cr |>
 tsk_pneu = TaskClassif$new(
   id = "pneu", 
   target = "ped_status",
-  backend = select(ped_cr_rf, ped_status, tend, cause, pneu))
+  backend = select(ped_cr_rf, ped_status, tend, cause, pneu, offset)) # offset makes the fit perfect.
 
 ## include RF hazard calculation and prediction
 lrn_rf_dt = po("encode", method = "treatment") %>>% 
@@ -255,7 +264,7 @@ ndf_cr <- ped_cr_rf |>
   make_newdata(tend = unique(tend), pneu = unique(pneu), cause = unique(cause))
 
 haz_rf_dt = lrn_rf_dt$predict_newdata(ndf_cr)$prob |> as.data.table()
-ndf_cr_dt_interim <- ndf_cr |> cbind(hazard = haz_rf_dt[["1"]])
+ndf_cr_dt_interim <- ndf_cr |> cbind(hazard = haz_rf_dt$'1')
 
 ndf_cr_dt_wide <- ndf_cr_dt_interim %>%
   pivot_wider(names_from = cause, values_from = hazard, names_prefix = "hazard_", values_fill = 0) %>% # so each row contains all cause-specific hazards
