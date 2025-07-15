@@ -1,3 +1,5 @@
+
+
 ## Reduction techniques competing risk
 
 # load libraries
@@ -40,17 +42,6 @@ model_colors <- c(
 
 model_fills  <- rep("darkgrey", 4); names(model_fills) <- names(model_colors)
 
-# theme
-# theme_cif <- theme_minimal(base_size = label_size) +
-#   theme(
-#     strip.text   = element_text(size = headline_size, face = "bold"),
-#     axis.title   = element_text(size = label_size),
-#     axis.text    = element_text(size = label_size),
-#     legend.text  = element_text(size = label_size),
-#     legend.position = "right",
-#     panel.spacing.x = unit(2, "lines")
-#   )
-
 theme_cif <- theme(
   text = element_text(size = 10),
   axis.title = element_text(size = 11),
@@ -65,9 +56,9 @@ theme_cif <- theme(
 data(sir.adm, package = "mvna")
 head(sir.adm)
 
-## -------------------------------------------------------------------------- ##
-## Aalen-Johansen, following Beyersmann chapter 4.3
-## -------------------------------------------------------------------------- ##
+## ========================================================================== ##
+## 1. Aalen-Johansen, following Beyersmann chapter 4.3
+## ========================================================================== ##
 tra <- matrix(FALSE, ncol = 3, nrow = 3)
 dimnames(tra) <- list(c("0", "1", "2"), c("0", "1", "2"))
 tra[1, 2:3] <- TRUE
@@ -137,34 +128,9 @@ ndf_cr_aj <- rbind(
     , model = "aj"
   )
 
-## -------------------------------------------------------------------------- ##
-## PAM, ndf_cr can be used for DT as well
-## -------------------------------------------------------------------------- ##
-# 
-# # create ped data set
-# ped_cr <- as_ped(sir.adm, Surv(time, status)~ ., combine = TRUE) |>
-#   mutate(cause = as.factor(cause), pneu = as.factor(pneu))
-# 
-# # estimate pam
-# pam <- pamm(ped_status ~ s(tend, by = interaction(cause, pneu)) + cause*pneu, data = ped_cr)
-# 
-# # build new data frame including cif for pam
-# ndf_cr <- ped_cr |>
-#   make_newdata(tend = unique(tend), pneu = unique(pneu), cause = unique(cause))
-# 
-# ndf_cr_pam <- ndf_cr |>
-#   group_by(cause, pneu) |> # important!
-#   add_cif(pam, ci=F, time_var = "tend") |> ungroup() |>
-#   mutate(
-#     cif_lower = NA,
-#     cif_upper = NA,
-#     cause = factor(cause, labels = c("Discharge", "Death")),
-#     pneu = factor(pneu, labels = c("No Pneumonia", "Pneumonia")),
-#     model = "pam"
-#   ) |>
-#   select(tend, pneu, cause, cif, cif_lower, cif_upper, model)
-
-## compare with transition probabilities
+## ========================================================================== ##
+# 2. XGBoost // Piecewise Exponential Model
+## ========================================================================== ##
 
 # create ped data set
 ped_cr <- as_ped(sir.adm, Surv(time, status)~ ., combine = TRUE, max_time = 150) |>
@@ -226,17 +192,19 @@ ndf_cr_xgb_pem <- ndf_cr_xgb_pem |>
          , model)
 
 
-## -------------------------------------------------------------------------- ##
-## Discrete Time
-## -------------------------------------------------------------------------- ##
+## ========================================================================== ##
+## 3. Random Forest Classifier // Discrete Time
+## ========================================================================== ##
 
-# define equidistant cut points
-eventtimes <- unique(sort(sir.adm[sir.adm$status != 0, "time"]))
-cut <- sort(union(seq(from=1, to=150, by=10), eventtimes))
-# -> no effect
+# # define equidistant cut points
+# eventtimes <- unique(sort(sir.adm[sir.adm$status != 0, "time"]))
+# cut <- sort(union(seq(from=1, to=150, by=1), eventtimes))
+# # -> no effect
 
 # create ped data set
-ped_cr <- as_ped(sir.adm, Surv(time, status)~ ., combine = TRUE, max_time = 150, cut = cut) |>
+ped_cr <- as_ped(sir.adm, Surv(time, status)~ ., combine = TRUE, max_time = 150
+                 # , cut = cut
+                 ) |>
   mutate(cause = as.factor(cause), pneu = as.factor(pneu))
 
 dt <- gam(
@@ -296,9 +264,9 @@ ndf_cr_rf_dt <- ndf_cr_dt_wide %>%
   )
 
 
-## -------------------------------------------------------------------------- ##
-## Pseudo Obs
-## -------------------------------------------------------------------------- ##
+## ========================================================================== ##
+## 4. Random Forest Classifier // Pseudo Obs
+## ========================================================================== ##
 
 ## PV
 ci_pv_fun <- function (time, pneumonia, cause = 'Death'){
@@ -332,11 +300,6 @@ ci_pv_fun <- function (time, pneumonia, cause = 'Death'){
     return(as.numeric(exp(-exp(c(1,1*(pneumonia == 'Pneumonia'))%*%fit$beta))))
   }
 }
-### test
-# ci_pv_fun(time = 50, pneumonia = 'No Pneumonia', cause = 'Discharge')
-# ci_pv_fun(time = 50, pneumonia = 'Pneumonia', cause = 'Death')
-
-mapply(ci_pv_fun, c(5, 130), 'yes')
 
 cutpoints = seq(5, 130, 5)
 ci_pv_data =  data.frame(tend = rep(cutpoints[2:length(cutpoints)],4), 
@@ -351,7 +314,9 @@ ndf_cr_pv$cif_upper = NA
 ndf_cr_pv$cif = NA
 ndf_cr_pv$cif = mapply(ci_pv_fun, ndf_cr_pv$tend, pneumonia = ndf_cr_pv$pneu, cause = ndf_cr_pv$cause) #may take a few seconds
 
-# visualize effect
+## ========================================================================== ##
+## 5. Combine Data Sets and Plot
+## ========================================================================== ##
 
 # combine all data sets
 ndf_cr_combined <- rbind(ndf_cr_aj
@@ -380,7 +345,7 @@ gg_survCurves <- ggplot(ndf_lines, aes(x = tend, y = cif)) +
     name = "Model:",
     values = model_colors,
     breaks = c("xgboost", "randforest", "pv", "aj"),
-    labels = c("XGBoost PEM", "Random Forest DT", "PV", "AJ")
+    labels = c("XGB PEM", "RFC DT", "PV", "AJ")
   ) +
   scale_linetype_discrete(
     name   = "Pneumonia:",
@@ -407,8 +372,7 @@ gg_survCurves <- ggplot(ndf_lines, aes(x = tend, y = cif)) +
 
 
 gg_survCurves
-#ggsave("figures/sir.adm_survivalCurves.png", gg_survCurves, width = 10, height = 6, dpi = 300) # TBD: add PV (whole curves or only points?) as dark orange/brown
-ggsave("figures/sir.adm_survivalCurves.png", gg_survCurves, width = 170, height = 100, units = "mm", dpi = 300) # TBD: add PV (whole curves or only points?) as dark orange/brown
+ggsave("figures/sir.adm_survivalCurves.png", gg_survCurves, width = 170, height = 100, units = "mm", dpi = 300)
 
 
 
