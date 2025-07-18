@@ -1,5 +1,3 @@
-
-
 ## Reduction techniques competing risk
 
 # load libraries
@@ -11,6 +9,7 @@ library(ggplot2)
 library(mvna)              # pneunomia data set
 library(etm)               # aalen johansen estimator
 library(cmprsk)            # needed for competing risks in etm, cf. Beyersmann p. 79
+library(pseudo)            # for pseudoci
 library(ranger)
 library(mlr3)
 library(mlr3learners)
@@ -18,10 +17,7 @@ library(mlr3pipelines)
 library(mlr3proba)
 theme_set(theme_bw())
 
-# setwd("C:/Users/ra56yaf/Desktop/Projects/StaBLab/Survival Analysis/survival_reductionTechniques/reduction-techniques")
-setwd("C:/Users/ra63liw/Documents/98_git/reduction-techniques")
-source("code/functions/etm-ci-trafo.R")
-
+source(here::here("code/functions/etm-ci-trafo.R"))
 
 ## initialize variables for plotting
 # fontsize
@@ -34,10 +30,10 @@ pointsize = 2
 strokewidth = 1.5
 # model_colors <- c("pam" = "firebrick2", "dt" = "steelblue", "pv" = "springgreen4", "aj" = "black")
 model_colors <- c(
-  "xgboost" = "#D55E00",   # vivid reddish-orange
-  "randforest"  = "#0072B2",   # deep sky blue
-  "pv"  = "#009E73",   # bluish green (unchanged)
-  "aj"  = "#000000"    # black (unchanged)
+  "xgboost"    = "#D55E00",   # vivid reddish-orange
+  "randforest" = "#0072B2",   # deep sky blue
+  "pv"         = "#009E73",   # bluish green (unchanged)
+  "aj"         = "#000000"    # black (unchanged)
 )
 
 model_fills  <- rep("darkgrey", 4); names(model_fills) <- names(model_colors)
@@ -378,7 +374,3 @@ gg_survCurves <- ggplot(ndf_lines, aes(x = tend, y = cif)) +
 
 gg_survCurves
 ggsave("figures/sir.adm_survivalCurves.png", gg_survCurves, width = 170, height = 100, units = "mm", dpi = 300)
-
-
-
-
