@@ -11,7 +11,7 @@ library(ggplot2)
 library(mvna)              # pneunomia data set
 library(etm)               # aalen johansen estimator
 library(cmprsk)            # needed for competing risks in etm, cf. Beyersmann p. 79
-library(pseudo)
+library(ranger)
 library(mlr3)
 library(mlr3learners)
 library(mlr3pipelines)
@@ -197,20 +197,20 @@ ndf_cr_xgb_pem <- ndf_cr_xgb_pem |>
 ## ========================================================================== ##
 
 # # define equidistant cut points
-# eventtimes <- unique(sort(sir.adm[sir.adm$status != 0, "time"]))
-# cut <- sort(union(seq(from=1, to=150, by=1), eventtimes))
+eventtimes <- unique(sort(sir.adm[sir.adm$status != 0, "time"]))
+cut <- sort(union(seq(from=1, to=150, by=1), eventtimes))
 # # -> no effect
 
 # create ped data set
 ped_cr <- as_ped(sir.adm, Surv(time, status)~ ., combine = TRUE, max_time = 150
-                 # , cut = cut
+                 , cut = cut
                  ) |>
   mutate(cause = as.factor(cause), pneu = as.factor(pneu))
-
-dt <- gam(
-  formula = ped_status ~ s(tend, by = interaction(cause, pneu)) + cause*pneu,
-  data = ped_cr,
-  family = binomial(link = "logit"))
+# 
+# dt <- gam(
+#   formula = ped_status ~ s(tend, by = interaction(cause, pneu)) + cause*pneu,
+#   data = ped_cr,
+#   family = binomial(link = "logit"))
 
 ped_cr_rf <- ped_cr |>
   mutate(ped_status = as.factor(ped_status))
@@ -218,11 +218,22 @@ ped_cr_rf <- ped_cr |>
 tsk_pneu = TaskClassif$new(
   id = "pneu", 
   target = "ped_status",
-  backend = select(ped_cr_rf, ped_status, tend, cause, pneu, offset)) # offset makes the fit perfect.
+  backend = select(ped_cr_rf, ped_status, tend, cause, pneu)) # offset makes the fit perfect.
 
 ## include RF hazard calculation and prediction
-lrn_rf_dt = po("encode", method = "treatment") %>>% 
+lrn_rf_dt = po("encode", method = "treatment") %>>%
   lrn("classif.ranger", num.trees=1000L) |> as_learner()
+
+# lrn_rf_dt = po("encode", method = "treatment") %>>% 
+#   lrn(
+#     'classif.xgboost', 
+#     nrounds = 1000, 
+#     eta = 0.025, 
+#     max_depth = 3, 
+#     objective = "binary:logistic") |> 
+#   as_learner()
+
+
 lrn_rf_dt$predict_type <- "prob"
 
 # Train the pipeline
@@ -276,28 +287,22 @@ ci_pv_fun <- function (time, pneumonia, cause = 'Death'){
     
     #One pseudo-value per patients
     sir.adm$pv<-as.vector(cipo$pseudo[[1]])
-    sir.adm$ipv<-as.vector(1-sir.adm$pv) # needed because the cloglog function implemented in geepack is log(log(1-x))
     
     ### Data analysis
-    ### Univariate analysis
-    fit <- geese(ipv ~ pneu, 
-                 data = sir.adm, id = id,  mean.link="cloglog",
-                 corstr="independence", family = gaussian())
-    return(as.numeric(exp(-exp(c(1,1*(pneumonia == 'Pneumonia'))%*%fit$beta))))
+    rforest <- ranger(formula = pv~pneu, data = sir.adm, replace = FALSE)
+    return(as.numeric(predict(rforest, data = sir.adm %>% mutate(pneumonia == 'No Pneumonia')%>%filter(pneu == 0))$predictions[1]*(pneumonia == 'No Pneumonia')+
+                        predict(rforest, data = sir.adm %>% mutate(pneumonia == 'Pneumonia')%>%filter(pneu == 1))$predictions[1]*(pneumonia == 'Pneumonia')))
   }else{
     #compute pseudo-value
     cipo <- pseudoci(sir.adm$time, sir.adm$status, tmax = time)
     
     #One pseudo-value per patients
     sir.adm$pv<-as.vector(cipo$pseudo[[2]])
-    sir.adm$ipv<-as.vector(1-sir.adm$pv) # needed because the cloglog function implemented in geepack is log(log(1-x))
     
     ### Data analysis
-    ### Univariate analysis
-    fit <- geese(ipv ~ pneu, 
-                 data = sir.adm, id = id,  mean.link="cloglog",
-                 corstr="independence", family = gaussian())
-    return(as.numeric(exp(-exp(c(1,1*(pneumonia == 'Pneumonia'))%*%fit$beta))))
+    rforest <- ranger(formula = pv~pneu, data = sir.adm, replace = FALSE)
+    return(as.numeric(predict(rforest, data = sir.adm %>% mutate(pneumonia == 'No Pneumonia')%>%filter(pneu == 0))$predictions[1]*(pneumonia == 'No Pneumonia')+
+                        predict(rforest, data = sir.adm %>% mutate(pneumonia == 'Pneumonia')%>%filter(pneu == 1))$predictions[1]*(pneumonia == 'Pneumonia')))
   }
 }
 
@@ -312,7 +317,7 @@ ndf_cr_pv$model = "pv"
 ndf_cr_pv$cif_lower = NA
 ndf_cr_pv$cif_upper = NA
 ndf_cr_pv$cif = NA
-ndf_cr_pv$cif = mapply(ci_pv_fun, ndf_cr_pv$tend, pneumonia = ndf_cr_pv$pneu, cause = ndf_cr_pv$cause) #may take a few seconds
+ndf_cr_pv$cif = mapply(ci_pv_fun, ndf_cr_pv$tend, pneumonia = ndf_cr_pv$pneu, cause = ndf_cr_pv$cause)
 
 ## ========================================================================== ##
 ## 5. Combine Data Sets and Plot
@@ -345,7 +350,7 @@ gg_survCurves <- ggplot(ndf_lines, aes(x = tend, y = cif)) +
     name = "Model:",
     values = model_colors,
     breaks = c("xgboost", "randforest", "pv", "aj"),
-    labels = c("XGB PEM", "RFC DT", "PV", "AJ")
+    labels = c("XGB PEM", "RFC DT", "RFC PV", "AJ")
   ) +
   scale_linetype_discrete(
     name   = "Pneumonia:",

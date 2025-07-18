@@ -1,26 +1,21 @@
-predict_pv <- function (time, complication){
+predict_pv<- function (time, complication){
   #compute pseudo-value
-  pv <- pseudosurv(tumor$days, tumor$status, tmax = time)
-  
-  #One pseudo-value per patients
-  tumor$pv<-as.vector(pv$pseudo)
-  tumor$ipv<-as.vector(1-pv$pseudo) # needed because the cloglog function implemented in geepack is log(log(1-x))
+  tumor <- tumor%>%
+    mutate(pseudo=pseudosurv(time = days, event = status, tmax = time)$pseudo)
   
   ### Data analysis
-  ### Univariate analysis
-  fit <- geese(ipv ~ complications, 
-               data = tumor, id = patID,  mean.link="cloglog",
-               corstr="independence", family = gaussian())
-  return(as.numeric(exp(-exp(c(1,1*(complication == 'yes'))%*%fit$beta))))
+  rforest <- ranger(formula = pseudo~complications, data = tumor, replace = FALSE)
+  return(as.numeric(predict(rforest, data = tumor %>% mutate(complications = "no"))$predictions[1]*(complication == 'no')+
+                      predict(rforest, data = tumor %>% mutate(complications = "yes"))$predictions[1]*(complication == 'yes')))
 }
 
 predict_pv_RMST <- function (time, complication){
   #compute pseudo-value
-  pv <- pseudomean(tumor$days, tumor$status, tmax = time)
-  #One pseudo-value per patients
-  tumor$rmst<-as.vector(pv)
+  tumor <- tumor%>%
+    mutate(pseudo=pseudomean(time = days, event = status, tmax = time))
   
   ### Data analysis
-  fit <- geese(rmst ~ complications, data =tumor, id = patID, mean.link = "identity")
-  return(as.numeric(c(1,1*(complication == 'no'))%*%fit$beta))
+  rforest <- ranger(formula = pseudo~complications, data = tumor, replace = FALSE)
+  return(as.numeric(predict(rforest, data = tumor %>% mutate(complications = "no"))$predictions[1]*(complication == 'no')+
+                      predict(rforest, data = tumor %>% mutate(complications = "yes"))$predictions[1]*(complication == 'yes')))
 }
