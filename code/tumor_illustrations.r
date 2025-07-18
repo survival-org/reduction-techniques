@@ -28,6 +28,7 @@ library(pammtools)
 library(ranger)
 library(geepack)
 library(ggplot2)
+library(randomForestSRC)
 
 # initialize variables
 # setwd("C:/Users/ra56yaf/Desktop/Projects/StaBLab/Survival Analysis/survival_reductionTechniques/reduction-techniques")
@@ -63,7 +64,7 @@ shared_color <- scale_color_manual(
   name = "Model:",
   values = model_colors,
   breaks = c("xgb", "rf", "pv", "km"),
-  labels = c("XGB PEM", "RFC DT", "PV", "KM")
+  labels = c("PPL XGB PEM", "PPL RF DT", "RF PV", "KM")
 )
 
 # Shared linetype
@@ -126,9 +127,10 @@ km_tidy = broom::tidy(km_complications) |>
 # Define discrete time pipeline with random forest
 pipeline_rf = ppl(
   "survtoclassif_disctime",
-  learner = lrn("classif.ranger", num.trees = 1000L),
+  learner = lrn("classif.rfsrc"),
   cut = cut,
   graph_learner = TRUE)
+
 
 # Train the pipeline
 pipeline_rf$train(tsk_tumor)
@@ -295,84 +297,7 @@ ggsave("figures/tumor_rmst.png", gg_rmst_time, width = 85, height = 100, units =
 library(patchwork)
 gg_tumor <- gg_survCurves + theme(legend.position = "none") + gg_rmst_time + plot_layout(guides = "collect") &
   theme(legend.position = "bottom")
-# 
-# # vertical alignment
-# gg_survCurves_adj <- gg_survCurves +
-#   theme(legend.position = "none",
-#         axis.title.x = element_blank(),
-#         axis.text.x = element_blank(),
-#         axis.ticks.x = element_blank())
-# 
-# gg_rmst_time_adj <- gg_rmst_time +
-#   theme(
-#     legend.position = "bottom",
-#     # legend.box = "horizontal", # uncomment to have both legend items next to each other
-#     legend.direction = "horizontal",
-#     legend.spacing.y = unit(0, "cm") # decreases vertical gap between lines
-#   )
-# 
-# gg_tumor <- gg_survCurves_adj + gg_rmst_time_adj +
-#   plot_layout(guides = "collect")
 
 gg_tumor
 ggsave("figures/tumor_combined.png", gg_tumor, width = 170, height = 100, units = "mm", dpi = 300)
 
-
-## -------------------------------------------------------------------------- ##
-## Backup: Further plots
-##  NOT USED
-## -------------------------------------------------------------------------- ##
-
-## PAM
-
-# calculate rmst (integrate step function)
-rmst_pam <- pred_pam %>%
-  group_by(complications) %>%
-  summarise(rmst = sum(prob_pam * diff(c(0, tend))))
-
-# transform into wide format for plotting area between survival curves
-pred_pam_wide <- pred_pam |> select(tend
-                                    , complications
-                                    , prob_pam) |>
-  pivot_wider(names_from = complications
-              , values_from = prob_pam) |>
-  mutate(diff = abs(yes - no))
-
-# plot survival curves and area corresponding to rmst
-gg_rmst_pam <- ggplot(pred_pam_wide, aes(x = tend)) +
-  geom_line(aes(y = yes), col="firebrick2") +
-  geom_line(aes(y = no), col="steelblue") +
-  # Ribbon for the shaded area
-  geom_ribbon(aes(ymin = yes, ymax = no), fill = "grey", alpha = 0.2) +
-  labs(y = "Survival Probability", x = "Time",
-       title = "RMST complications 'yes' and 'no'",
-       subtitle = "Grey area represents RMST difference") +
-  theme_minimal() +
-  theme(legend.position = "none")
-
-
-## DT
-
-rmst_dt <- pred_dt %>%
-  group_by(complications) %>%
-  summarise(rmst = sum(prob_dt * diff(c(0, tend))))
-
-# transform into wide format for plotting area between survival curves
-pred_dt_wide <- pred_dt |> select(tend
-                                  , complications
-                                  , prob_dt) |>
-  pivot_wider(names_from = complications
-              , values_from = prob_dt) |>
-  mutate(diff = abs(yes - no))
-
-# plot survival curves and area corresponding to rmst
-gg_rmst_dt <- ggplot(pred_dt_wide, aes(x = tend)) +
-  geom_line(aes(y = yes), col="firebrick2") +
-  geom_line(aes(y = no), col="steelblue") +
-  # Ribbon for the shaded area
-  geom_ribbon(aes(ymin = yes, ymax = no), fill = "grey", alpha = 0.2) +
-  labs(y = "Survival Probability", x = "Time",
-       title = "RMST complications 'yes' and 'no'",
-       subtitle = "Grey area represents RMST difference") +
-  theme_minimal() +
-  theme(legend.position = "none")
