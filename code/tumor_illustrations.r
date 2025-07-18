@@ -64,7 +64,7 @@ shared_color <- scale_color_manual(
   name = "Model:",
   values = model_colors,
   breaks = c("xgb", "rf", "pv", "km"),
-  labels = c("PPL XGB PEM", "PPL RF DT", "RF PV", "KM")
+  labels = c("XGB PEM", "RF DT", "RF PV", "KM")
 )
 
 # Shared linetype
