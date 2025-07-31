@@ -11,6 +11,7 @@ library(ggplot2)
 library(mvna)              # pneunomia data set
 library(etm)               # aalen johansen estimator
 library(cmprsk)            # needed for competing risks in etm, cf. Beyersmann p. 79
+library(pseudo)
 library(ranger)
 library(mlr3)
 library(mlr3learners)
@@ -196,12 +197,15 @@ ndf_cr_xgb_pem <- ndf_cr_xgb_pem |>
 ## 3. Random Forest Classifier // Discrete Time
 ## ========================================================================== ##
 
+
+
 # # define equidistant cut points
 eventtimes <- unique(sort(sir.adm[sir.adm$status != 0, "time"]))
 cut <- sort(union(seq(from=1, to=150, by=1), eventtimes))
 # # -> no effect
 
 # create ped data set
+# sir.adm$status <- as.factor(sir.adm$status)
 ped_cr <- as_ped(sir.adm, Surv(time, status)~ ., combine = TRUE, max_time = 150
                  , cut = cut
                  ) |>
@@ -218,11 +222,11 @@ ped_cr_rf <- ped_cr |>
 tsk_pneu = TaskClassif$new(
   id = "pneu", 
   target = "ped_status",
-  backend = select(ped_cr_rf, ped_status, tend, cause, pneu)) # offset makes the fit perfect.
+  backend = select(ped_cr_rf, ped_status, tend, cause, pneu)) # offset makes the fit good.
 
 ## include RF hazard calculation and prediction
 lrn_rf_dt = po("encode", method = "treatment") %>>%
-  lrn("classif.ranger", num.trees=1000L) |> as_learner()
+  lrn("classif.rfsrc", ntree=1000L) |> as_learner()
 
 # lrn_rf_dt = po("encode", method = "treatment") %>>% 
 #   lrn(
@@ -233,11 +237,21 @@ lrn_rf_dt = po("encode", method = "treatment") %>>%
 #     objective = "binary:logistic") |> 
 #   as_learner()
 
-
 lrn_rf_dt$predict_type <- "prob"
 
+set.seed(32168)
 # Train the pipeline
 lrn_rf_dt$train(tsk_pneu)
+
+# print(lrn_rf_dt$importance())
+
+# importance with offset
+# cause      tend      pneu    offset 
+# 30.755744  8.883917  7.634197  0.000000 
+
+# importance w/o offset
+# cause      tend      pneu 
+# 26.505686  5.997663  5.817849 
 
 ndf_cr <- ped_cr_rf |>
   make_newdata(tend = unique(tend), pneu = unique(pneu), cause = unique(cause))
@@ -350,7 +364,7 @@ gg_survCurves <- ggplot(ndf_lines, aes(x = tend, y = cif)) +
     name = "Model:",
     values = model_colors,
     breaks = c("xgboost", "randforest", "pv", "aj"),
-    labels = c("XGB PEM", "RFC DT", "RFC PV", "AJ")
+    labels = c("XGB PEM", "RF DT", "RF PV", "AJ")
   ) +
   scale_linetype_discrete(
     name   = "Pneumonia:",
