@@ -1,5 +1,3 @@
-
-
 ## Reduction techniques competing risk
 
 # load libraries
@@ -11,7 +9,7 @@ library(ggplot2)
 library(mvna)              # pneunomia data set
 library(etm)               # aalen johansen estimator
 library(cmprsk)            # needed for competing risks in etm, cf. Beyersmann p. 79
-library(pseudo)
+library(pseudo)            # for pseudoci
 library(ranger)
 library(mlr3)
 library(mlr3learners)
@@ -19,10 +17,7 @@ library(mlr3pipelines)
 library(mlr3proba)
 theme_set(theme_bw())
 
-# setwd("C:/Users/ra56yaf/Desktop/Projects/StaBLab/Survival Analysis/survival_reductionTechniques/reduction-techniques")
-setwd("C:/Users/ra63liw/Documents/98_git/reduction-techniques")
-source("code/functions/etm-ci-trafo.R")
-
+source(here::here("code/functions/etm-ci-trafo.R"))
 
 ## initialize variables for plotting
 # fontsize
@@ -35,10 +30,10 @@ pointsize = 2
 strokewidth = 1.5
 # model_colors <- c("pam" = "firebrick2", "dt" = "steelblue", "pv" = "springgreen4", "aj" = "black")
 model_colors <- c(
-  "xgboost" = "#D55E00",   # vivid reddish-orange
-  "randforest"  = "#0072B2",   # deep sky blue
-  "pv"  = "#009E73",   # bluish green (unchanged)
-  "aj"  = "#000000"    # black (unchanged)
+  "xgboost"    = "#D55E00",   # vivid reddish-orange
+  "randforest" = "#0072B2",   # deep sky blue
+  "pv"         = "#009E73",   # bluish green (unchanged)
+  "aj"         = "#000000"    # black (unchanged)
 )
 
 model_fills  <- rep("darkgrey", 4); names(model_fills) <- names(model_colors)
@@ -197,15 +192,12 @@ ndf_cr_xgb_pem <- ndf_cr_xgb_pem |>
 ## 3. Random Forest Classifier // Discrete Time
 ## ========================================================================== ##
 
-
-
 # # define equidistant cut points
 eventtimes <- unique(sort(sir.adm[sir.adm$status != 0, "time"]))
 cut <- sort(union(seq(from=1, to=150, by=1), eventtimes))
 # # -> no effect
 
 # create ped data set
-# sir.adm$status <- as.factor(sir.adm$status)
 ped_cr <- as_ped(sir.adm, Surv(time, status)~ ., combine = TRUE, max_time = 150
                  , cut = cut
                  ) |>
@@ -222,11 +214,11 @@ ped_cr_rf <- ped_cr |>
 tsk_pneu = TaskClassif$new(
   id = "pneu", 
   target = "ped_status",
-  backend = select(ped_cr_rf, ped_status, tend, cause, pneu)) # offset makes the fit good.
+  backend = select(ped_cr_rf, ped_status, tend, cause, pneu)) # offset makes the fit perfect.
 
 ## include RF hazard calculation and prediction
 lrn_rf_dt = po("encode", method = "treatment") %>>%
-  lrn("classif.rfsrc", ntree=1000L) |> as_learner()
+  lrn("classif.ranger", num.trees=1000L) |> as_learner()
 
 # lrn_rf_dt = po("encode", method = "treatment") %>>% 
 #   lrn(
@@ -237,21 +229,11 @@ lrn_rf_dt = po("encode", method = "treatment") %>>%
 #     objective = "binary:logistic") |> 
 #   as_learner()
 
+
 lrn_rf_dt$predict_type <- "prob"
 
-set.seed(32168)
 # Train the pipeline
 lrn_rf_dt$train(tsk_pneu)
-
-# print(lrn_rf_dt$importance())
-
-# importance with offset
-# cause      tend      pneu    offset 
-# 30.755744  8.883917  7.634197  0.000000 
-
-# importance w/o offset
-# cause      tend      pneu 
-# 26.505686  5.997663  5.817849 
 
 ndf_cr <- ped_cr_rf |>
   make_newdata(tend = unique(tend), pneu = unique(pneu), cause = unique(cause))
@@ -364,7 +346,7 @@ gg_survCurves <- ggplot(ndf_lines, aes(x = tend, y = cif)) +
     name = "Model:",
     values = model_colors,
     breaks = c("xgboost", "randforest", "pv", "aj"),
-    labels = c("XGB PEM", "RF DT", "RF PV", "AJ")
+    labels = c("XGB PEM", "RFC DT", "RFC PV", "AJ")
   ) +
   scale_linetype_discrete(
     name   = "Pneumonia:",
@@ -392,7 +374,3 @@ gg_survCurves <- ggplot(ndf_lines, aes(x = tend, y = cif)) +
 
 gg_survCurves
 ggsave("figures/sir.adm_survivalCurves.png", gg_survCurves, width = 170, height = 100, units = "mm", dpi = 300)
-
-
-
-

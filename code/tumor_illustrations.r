@@ -25,15 +25,18 @@ library(tidyr)
 library(mgcv)
 library(survival)
 library(pammtools)
-library(ranger)
 library(geepack)
+library(pseudo)
 library(ggplot2)
 library(randomForestSRC)
+library(mlr3learners)
+library(mlr3proba)
+library(mlr3pipelines)
+library(mlr3extralearners) # for randomForestSRC learner / pak::pak("mlr-org/mlr3extralearners")
+theme_set(theme_bw())
 
 # initialize variables
-# setwd("C:/Users/ra56yaf/Desktop/Projects/StaBLab/Survival Analysis/survival_reductionTechniques/reduction-techniques")
-setwd("C:/Users/ra63liw/Documents/98_git/reduction-techniques")
-source("code/functions/calc-pv-and-rmst.R")
+source(here::here("code/functions/calc-pv-and-rmst.R"))
 
 # initalize plotting parameters
 linewidth = 1
@@ -97,7 +100,7 @@ data("tumor", package = "pammtools")
 head(tumor)
 
 # Create survival task
-tsk_tumor = TaskSurv$new(
+tsk_tumor = TaskSurv$new( 
   id = "tumor", 
   backend = select(tumor, days, status, complications), 
   time = "days", 
@@ -300,4 +303,3 @@ gg_tumor <- gg_survCurves + theme(legend.position = "none") + gg_rmst_time + plo
 
 gg_tumor
 ggsave("figures/tumor_combined.png", gg_tumor, width = 170, height = 100, units = "mm", dpi = 300)
-
