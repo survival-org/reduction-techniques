@@ -7,7 +7,7 @@ source(here::here("code/functions/calc-rfsc-ranger.R"))
 # Set parallel strategy
 plan(multisession, workers = parallel::detectCores() - 1)
 
-n_sim <- 100
+n_sim <- 500
 eval_times <- seq(1, 150, by = 1)
 
 # Get AJ reference CIs once
@@ -66,7 +66,8 @@ coverage_results <- lapply(simulation_results, function(sim_df) {
 # Aggregate results across simulations
 coverage_summary <- bind_rows(coverage_results) %>%
   group_by(model, cause, pneu, tend) %>%
-  summarise(mean_coverage = mean(coverage), .groups = "drop")
+  filter(!all(is.na(coverage))) %>%
+  summarise(mean_coverage = mean(coverage, na.rm = TRUE), .groups = "drop")
 
 # Plot
 gg_coverage <- ggplot(coverage_summary, aes(x = tend, y = mean_coverage, color = model)) +
