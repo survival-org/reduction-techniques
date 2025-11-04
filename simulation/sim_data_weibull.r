@@ -3,7 +3,7 @@ library(dplyr)
 library(tidyr)
 library(ggplot2)
 
-dir_data <- "C:/Users/ra56yaf/Downloads/data_sim"
+dir_data <- paste0(here::here(), "/data")
 
 # helpers ----
 sim_weibull <- function(
@@ -86,7 +86,7 @@ b3 <- -0.3
 b4 <- 0
 formula <- as.formula("~ b0 + b1*x1 + b2*x2 + b3*x1*x2 + b4*x3")
 cut <- seq(0, 10, by = 0.1)
-lambda_cens <- 0.08
+lambda_cens <- 0.07
 n <- 750
 
 instance <- sim_weibull(
@@ -98,9 +98,11 @@ instance <- sim_weibull(
 
 calib <- calib_sum(instance)
 calib$n_events
-calib$n_cens
-calib$n_cens_1
-calib$n_cens_3
+
+n_total = calib$n_events + calib$n_cens
+calib$n_cens / n_total
+calib$n_cens_1 / n_total
+calib$n_cens_3 / n_total
 calib$sum_events
 calib$sum_cens
 calib$hist_events
@@ -114,7 +116,7 @@ b3 <- -0.3
 b4 <- 0
 formula <- as.formula("~ b0 + b1*x1 + b2*x2 + b3*x1*x2 + b4*x3")
 cut <- seq(0, 10, by = 0.1)
-lambda_cens <- 0.08
+lambda_cens <- 0.07
 ns <- c(750, 10000)
 nsim <- 100
 
