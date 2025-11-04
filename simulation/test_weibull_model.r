@@ -12,7 +12,7 @@ library(pec) # integrated brier score
 # load data
 dir_data <- paste0(here::here(), "/data")
 datasets <- readRDS(file.path(dir_data, "datasets_sim_weibull.rds"))
-df <- datasets[[2]][[1]]
+df <- datasets[[1]][[1]]
 
 set.seed(123)
 split = sample.split(df$status, SplitRatio = 0.7)
@@ -179,5 +179,6 @@ test_task = as_task_surv(test_set, time = "time", event = "status")
     mlr3_p$score(msr("surv.graf", p_max = 0.8))
   )
 
+  print(scores)
 
 
