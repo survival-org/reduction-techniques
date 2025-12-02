@@ -47,10 +47,11 @@ model_colors <- c(
   "xgb" = "#D55E00",   # vivid reddish-orange
   "rf"  = "#0072B2",   # deep sky blue
   "pv"  = "#009E73",   # bluish green (unchanged)
+  "cox" = "#ffd537",   # yellow
   "km"  = "#000000"    # black (unchanged)
 )
 
-model_fills  <- rep("darkgrey", 4); names(model_fills) <- names(model_colors)
+model_fills  <- rep("darkgrey", 5); names(model_fills) <- names(model_colors)
 
 theme_reduction <- theme(
   text = element_text(size = 10),
@@ -66,8 +67,8 @@ theme_reduction <- theme(
 shared_color <- scale_color_manual(
   name = "Model:",
   values = model_colors,
-  breaks = c("xgb", "rf", "pv", "km"),
-  labels = c("XGB PEM", "RF DT", "RF PV", "KM")
+  breaks = c("xgb", "rf", "pv", "cox", "km"),
+  labels = c("XGB PEM", "RF DT", "RF PV","COX", "KM")
 )
 
 # Shared linetype
@@ -83,15 +84,17 @@ shared_shape <- scale_shape_manual(
   labels = c("Yes" = "yes", "No" = "no")
 )
 
+
 # Shared fill (to disable fill legend)
-shared_fill <- scale_fill_manual(values = c("xgb" = "darkgrey", "rf" = "darkgrey", "pv" = "darkgrey", "km" = "darkgrey"))
+shared_fill <- scale_fill_manual(values = c("xgb" = "darkgrey", "rf" = "darkgrey", "pv" = "darkgrey", "cox" = "darkgrey", "km" = "darkgrey"))
 
 # Shared guides
 shared_guides <- guides(
   color = guide_legend(order = 1),
   linetype = guide_legend(order = 2, override.aes = list(shape = c(2, 0))),
   shape = guide_legend(order = 2),
-  fill = "none"
+  fill = "none",
+  linewidth = 'none'
 )
 
 
@@ -208,7 +211,7 @@ xgb_yes_complications <- data.frame(
 xgb_tidy <- rbind(xgb_no_complications, xgb_yes_complications)
 
 # ============================================================================
-# 4. PSEUDO OBSERVATION WITH RANDOM FOREST (TBD)
+# 4. PSEUDO OBSERVATION WITH RANDOM FOREST
 # ============================================================================
 tumor$patID <- 1:length(tumor$days)
 cutpoints <- seq(0, 3800, by=400)
@@ -224,7 +227,39 @@ pv_tidy <- data.frame(
 pv_tidy$prob = mapply(predict_pv, pv_tidy$tend, pv_tidy$complications) #may take a few seconds
 
 # ============================================================================
-# 5. COMBINE DATA AND PLOT SURVIVAL
+# 5. COX PH
+# ============================================================================
+#fit a (stratified) Cox PH 
+fit <- coxph(Surv(days, status) ~ complications, data = tumor)
+#get predictions
+newdata = data.frame(complications = c('no', 'yes'))
+pred_cox = survfit(fit,newdata= newdata)
+
+# Extract survival curves for each group
+cox_no_complications <- data.frame(
+  tend = as.numeric(pred_cox$time),
+  prob = as.numeric(pred_cox$surv[,1]),
+  km_low = NA,
+  km_high = NA,
+  complications = "no",
+  model = "cox"
+)
+
+cox_yes_complications <- data.frame(
+  tend = as.numeric(pred_cox$time),
+  prob = as.numeric(pred_cox$surv[,2]),
+  km_low = NA,
+  km_high = NA,
+  complications = "yes",
+  model = "cox"
+)
+
+cox_tidy <- rbind(cox_no_complications, cox_yes_complications) 
+
+
+
+# ============================================================================
+# 6. COMBINE DATA AND PLOT SURVIVAL
 # ============================================================================
 
 surv_tidy <- rbind(
@@ -232,6 +267,7 @@ surv_tidy <- rbind(
   , xgb_tidy 
   , rf_tidy
   , pv_tidy
+  , cox_tidy
   ) |>
   mutate(complications = factor(complications, levels = c("yes", "no")))
 
@@ -244,6 +280,8 @@ gg_survCurves <- ggplot(surv_lines, aes(x = tend, y = prob)) +
   geom_point(data=surv_points, aes(color=model, shape=complications), size=pointsize, stroke=strokewidth) +
   scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, by = 0.25)) +
   shared_color + shared_linetype + shared_shape + shared_fill + shared_guides +
+  guides(fill = "none",
+         color = guide_legend(order = 1,override.aes = list(shape = NA))) +
   labs(x = "Time", y = "Survival Probability") +
   theme_reduction
 
@@ -253,7 +291,7 @@ ggsave("figures/tumor_survivalCurves.png", gg_survCurves, width = 85, height = 1
   
 
 # ============================================================================
-# 6. CALCULATE RMST (ALL ESTIMATES)
+# 7. CALCULATE RMST (ALL ESTIMATES)
 # ============================================================================
 
 # KM, XGB, RF --> plotted as lines
@@ -269,7 +307,7 @@ rmst_points = data.frame(tend = rep(cutpoints[2:length(cutpoints)],2),
 rmst_points$rmst = mapply(predict_pv_RMST, rmst_points$tend, rmst_points$complications) #may take a few seconds
 
 ## ========================================================================== ##
-## 7. COMBINE DATA AND PLOT RMST
+## 8. COMBINE DATA AND PLOT RMST
 ## ========================================================================== ##
 
 rmst_tidy <- rbind(rmst_lines, rmst_points) |>
@@ -283,8 +321,10 @@ rmst_points = subset(rmst_tidy, model == "pv")
 # plot rmst over time
 gg_rmst_time <- ggplot(rmst_lines, aes(x = tend, y = rmst)) +
   geom_line(aes(color = model, linetype = complications), linewidth = linewidth) +
-  geom_point(data=rmst_points, aes(color=model, shape=complications), size=pointsize, stroke=strokewidth) +
-  shared_color + shared_linetype + shared_shape + shared_fill + shared_guides + guides(fill = "none") +
+  geom_point(data=rmst_points, aes(color=model, shape=complications), size=pointsize, stroke=strokewidth)+
+  shared_color + shared_linetype + shared_shape + shared_fill + shared_guides + 
+  guides(fill = "none",
+         color = guide_legend(order = 1,override.aes = list(shape = NA))) +
   labs(x = "Time", y = "Restricted Mean Survival Time") +
   theme_reduction
 
@@ -293,7 +333,7 @@ ggsave("figures/tumor_rmst.png", gg_rmst_time, width = 85, height = 100, units =
 
 
 ## ========================================================================== ##
-## 8. COMBINE SURVIVAL PLOT WITH RMST PLOT
+## 9. COMBINE SURVIVAL PLOT WITH RMST PLOT
 ## ========================================================================== ##
 
 # horizontal alignment
@@ -302,4 +342,4 @@ gg_tumor <- gg_survCurves + theme(legend.position = "none") + gg_rmst_time + plo
   theme(legend.position = "bottom")
 
 gg_tumor
-ggsave("figures/tumor_combined.png", gg_tumor, width = 170, height = 100, units = "mm", dpi = 300)
+ggsave("figures/tumor_combined.png", gg_tumor, width = 180, height = 100, units = "mm", dpi = 300)
